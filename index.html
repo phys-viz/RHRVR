@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Right Hand Rule VR</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        background: #0a0e1a;
+        color: #e0e0e0;
+        font-family: 'Rajdhani', sans-serif;
+        overflow: hidden;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+    #overlay {
+        position: absolute;
+        top: 0; left: 0; width: 100%; height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+        background: radial-gradient(ellipse at center, #0f1428 0%, #0a0e1a 70%);
+        transition: opacity 0.5s;
+    }
+    #overlay.hidden { opacity: 0; pointer-events: none; }
+    h1 {
+        font-family: 'Share Tech Mono', monospace;
+        font-size: 2.2rem;
+        color: #00e5ff;
+        text-transform: uppercase;
+        letter-spacing: 4px;
+        margin-bottom: 0.5rem;
+        text-shadow: 0 0 20px rgba(0,229,255,0.3);
+    }
+    .subtitle {
+        font-size: 1.1rem;
+        color: #ffab40;
+        margin-bottom: 2rem;
+        letter-spacing: 2px;
+    }
+    .info-panel {
+        max-width: 520px;
+        text-align: center;
+        margin-bottom: 2rem;
+        line-height: 1.6;
+        color: #8892b0;
+        font-size: 0.95rem;
+    }
+    .info-panel strong { color: #e0e0e0; }
+    #enter-vr {
+        font-family: 'Share Tech Mono', monospace;
+        font-size: 1.1rem;
+        padding: 16px 48px;
+        background: transparent;
+        border: 2px solid #00e5ff;
+        color: #00e5ff;
+        cursor: pointer;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        transition: all 0.3s;
+    }
+    #enter-vr:hover {
+        background: rgba(0,229,255,0.1);
+        box-shadow: 0 0 30px rgba(0,229,255,0.2);
+    }
+    #enter-vr:disabled {
+        border-color: #333;
+        color: #555;
+        cursor: not-allowed;
+    }
+    #status {
+        margin-top: 1rem;
+        font-family: 'Share Tech Mono', monospace;
+        font-size: 0.85rem;
+        color: #555;
+    }
+    canvas { display: block; }
+    #mode-indicator {
+        position: absolute;
+        top: 20px; left: 50%;
+        transform: translateX(-50%);
+        font-family: 'Share Tech Mono', monospace;
+        font-size: 0.85rem;
+        color: #8892b0;
+        z-index: 5;
+        display: none;
+    }
+</style>
+</head>
+<body>
+
+<div id="overlay">
+    <h1>Right Hand Rule</h1>
+    <div class="subtitle">F = qv × B</div>
+    <div class="info-panel">
+        Use your <strong>actual right hand</strong> to learn the cross product.<br>
+        Orient your fingers along <strong style="color:#00e5ff">v</strong>,
+        curl toward <strong style="color:#ffab40">B</strong>,
+        and your thumb points along <strong style="color:#69f0ae">F</strong>.
+        <br><br>
+        <strong>Scaffolded Mode</strong> — arrows on your hand guide alignment<br>
+        <strong>Prediction Mode</strong> — just you and the glow
+    </div>
+    <button id="enter-vr">Enter VR</button>
+    <div id="status">Checking WebXR support...</div>
+</div>
+
+<div id="mode-indicator"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function() {
+    'use strict';
+
+    // ── PALETTE ──
+    const COL = {
+        bg:       0x0a0e1a,
+        grid:     0x1a2040,
+        cyan:     0x00e5ff,
+        amber:    0xffab40,
+        green:    0x69f0ae,
+        red:      0xff5252,
+        white:    0xe0e0e0,
+        dimCyan:  0x004d66,
+        panel:    0x111833,
+    };
+
+    // ── JOINT NAMES ──
+    const FINGER_JOINTS = [
+        'thumb-metacarpal','thumb-phalanx-proximal','thumb-phalanx-distal','thumb-tip',
+        'index-finger-metacarpal','index-finger-phalanx-proximal','index-finger-phalanx-intermediate','index-finger-phalanx-distal','index-finger-tip',
+        'middle-finger-metacarpal','middle-finger-phalanx-proximal','middle-finger-phalanx-intermediate','middle-finger-phalanx-distal','middle-finger-tip',
+        'ring-finger-metacarpal','ring-finger-phalanx-proximal','ring-finger-phalanx-intermediate','ring-finger-phalanx-distal','ring-finger-tip',
+        'pinky-finger-metacarpal','pinky-finger-phalanx-proximal','pinky-finger-phalanx-intermediate','pinky-finger-phalanx-distal','pinky-finger-tip',
+        'wrist'
+    ];
+
+    const BONE_CONNECTIONS = [
+        // Thumb
+        ['wrist','thumb-metacarpal'],['thumb-metacarpal','thumb-phalanx-proximal'],
+        ['thumb-phalanx-proximal','thumb-phalanx-distal'],['thumb-phalanx-distal','thumb-tip'],
+        // Index
+        ['wrist','index-finger-metacarpal'],['index-finger-metacarpal','index-finger-phalanx-proximal'],
+        ['index-finger-phalanx-proximal','index-finger-phalanx-intermediate'],
+        ['index-finger-phalanx-intermediate','index-finger-phalanx-distal'],['index-finger-phalanx-distal','index-finger-tip'],
+        // Middle
+        ['wrist','middle-finger-metacarpal'],['middle-finger-metacarpal','middle-finger-phalanx-proximal'],
+        ['middle-finger-phalanx-proximal','middle-finger-phalanx-intermediate'],
+        ['middle-finger-phalanx-intermediate','middle-finger-phalanx-distal'],['middle-finger-phalanx-distal','middle-finger-tip'],
+        // Ring
+        ['wrist','ring-finger-metacarpal'],['ring-finger-metacarpal','ring-finger-phalanx-proximal'],
+        ['ring-finger-phalanx-proximal','ring-finger-phalanx-intermediate'],
+        ['ring-finger-phalanx-intermediate','ring-finger-phalanx-distal'],['ring-finger-phalanx-distal','ring-finger-tip'],
+        // Pinky
+        ['wrist','pinky-finger-metacarpal'],['pinky-finger-metacarpal','pinky-finger-phalanx-proximal'],
+        ['pinky-finger-phalanx-proximal','pinky-finger-phalanx-intermediate'],
+        ['pinky-finger-phalanx-intermediate','pinky-finger-phalanx-distal'],['pinky-finger-phalanx-distal','pinky-finger-tip'],
+        // Palm cross-connections
+        ['index-finger-metacarpal','middle-finger-metacarpal'],
+        ['middle-finger-metacarpal','ring-finger-metacarpal'],
+        ['ring-finger-metacarpal','pinky-finger-metacarpal'],
+    ];
+
+    // ── CHALLENGES ──
+    const CARDINAL_CHALLENGES = [
+        { v: [1,0,0],  B: [0,1,0]  },  // F = +z
+        { v: [0,1,0],  B: [0,0,1]  },  // F = +x
+        { v: [0,0,1],  B: [1,0,0]  },  // F = +y
+        { v: [-1,0,0], B: [0,1,0]  },  // F = -z
+        { v: [0,-1,0], B: [0,0,1]  },  // F = -x
+        { v: [1,0,0],  B: [0,0,1]  },  // F = -y
+        { v: [0,1,0],  B: [1,0,0]  },  // F = -z
+        { v: [0,0,-1], B: [0,1,0]  },  // F = +x
+    ];
+
+    function randomUnitVector() {
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        return [
+            Math.sin(phi) * Math.cos(theta),
+            Math.sin(phi) * Math.sin(theta),
+            Math.cos(phi)
+        ];
+    }
+
+    function generateArbitraryChallenge() {
+        const v = randomUnitVector();
+        let B = randomUnitVector();
+        // Ensure v and B aren't too parallel
+        const vVec = new THREE.Vector3(...v);
+        let bVec = new THREE.Vector3(...B);
+        while (Math.abs(vVec.dot(bVec)) > 0.85) {
+            B = randomUnitVector();
+            bVec = new THREE.Vector3(...B);
+        }
+        return { v, B };
+    }
+
+    // ── STATE ──
+    let mode = 'scaffolded'; // 'scaffolded' | 'prediction'
+    let level = 1;           // 1 = cardinal, 2 = arbitrary
+    let score = 0;
+    let streak = 0;
+    let challengeIndex = 0;
+    let currentChallenge = null;
+    let alignmentScore = 0;
+    let lockTimer = 0;
+    let locked = false;
+    let showingResult = false;
+    let resultTimer = 0;
+    let handTracked = false;
+
+    const jointPos = {};  // name -> THREE.Vector3
+
+    // ── THREE.JS SETUP ──
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(COL.bg);
+    scene.fog = new THREE.Fog(COL.bg, 8, 25);
+
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 100);
+    camera.position.set(0, 1.6, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.xr.enabled = true;
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    document.body.appendChild(renderer.domElement);
+
+    // ── LIGHTING ──
+    const ambient = new THREE.AmbientLight(0x334466, 0.6);
+    scene.add(ambient);
+    const pointLight = new THREE.PointLight(COL.cyan, 0.8, 20);
+    pointLight.position.set(0, 3, 0);
+    scene.add(pointLight);
+
+    // ── FLOOR GRID ──
+    const gridHelper = new THREE.GridHelper(20, 40, COL.grid, COL.grid);
+    gridHelper.material.opacity = 0.3;
+    gridHelper.material.transparent = true;
+    scene.add(gridHelper);
+
+    // Circular platform
+    const platformGeo = new THREE.CylinderGeometry(1.5, 1.5, 0.02, 64);
+    const platformMat = new THREE.MeshStandardMaterial({
+        color: 0x111833,
+        emissive: 0x0a1030,
+        metalness: 0.5,
+        roughness: 0.8
+    });
+    const platform = new THREE.Mesh(platformGeo, platformMat);
+    platform.position.y = 0.01;
+    scene.add(platform);
+
+    // ── VECTOR ARROWS ──
+    const ARROW_LEN = 0.35;
+    const ARROW_ORIGIN = new THREE.Vector3(0, 1.2, -0.55);
+
+    let vArrow, bArrow, fArrow;
+    const vDir = new THREE.Vector3();
+    const bDir = new THREE.Vector3();
+    const fDir = new THREE.Vector3();
+
+    function createArrow(color, origin, dir, len) {
+        const arrow = new THREE.ArrowHelper(dir, origin, len, color, len * 0.25, len * 0.12);
+        arrow.line.material.linewidth = 2;
+        scene.add(arrow);
+        return arrow;
+    }
+
+    function updateArrows() {
+        if (vArrow) scene.remove(vArrow);
+        if (bArrow) scene.remove(bArrow);
+        if (fArrow) { scene.remove(fArrow); fArrow = null; }
+
+        vArrow = createArrow(COL.cyan, ARROW_ORIGIN, vDir, ARROW_LEN);
+        bArrow = createArrow(COL.amber, ARROW_ORIGIN, bDir, ARROW_LEN);
+    }
+
+    function showForceArrow() {
+        if (fArrow) scene.remove(fArrow);
+        fArrow = createArrow(COL.green, ARROW_ORIGIN, fDir, ARROW_LEN);
+    }
+
+    // ── VECTOR LABELS ──
+    function makeTextSprite(text, color, fontSize) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.font = `bold ${fontSize || 40}px 'Share Tech Mono', monospace`;
+        ctx.fillStyle = color || '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, 64, 32);
+        const tex = new THREE.CanvasTexture(canvas);
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+        const sprite = new THREE.Sprite(mat);
+        sprite.scale.set(0.12, 0.06, 1);
+        return sprite;
+    }
+
+    let vLabel, bLabel, fLabel;
+
+    function updateLabels() {
+        if (vLabel) scene.remove(vLabel);
+        if (bLabel) scene.remove(bLabel);
+        if (fLabel) { scene.remove(fLabel); fLabel = null; }
+
+        vLabel = makeTextSprite('v', '#00e5ff');
+        vLabel.position.copy(ARROW_ORIGIN).addScaledVector(vDir, ARROW_LEN + 0.06);
+        scene.add(vLabel);
+
+        bLabel = makeTextSprite('B', '#ffab40');
+        bLabel.position.copy(ARROW_ORIGIN).addScaledVector(bDir, ARROW_LEN + 0.06);
+        scene.add(bLabel);
+    }
+
+    function showForceLabel() {
+        if (fLabel) scene.remove(fLabel);
+        fLabel = makeTextSprite('F', '#69f0ae');
+        fLabel.position.copy(ARROW_ORIGIN).addScaledVector(fDir, ARROW_LEN + 0.06);
+        scene.add(fLabel);
+    }
+
+    // ── HAND JOINT VISUALIZATION ──
+    const jointMeshes = {};
+    const jointMat = new THREE.MeshStandardMaterial({
+        color: COL.cyan,
+        emissive: COL.dimCyan,
+        emissiveIntensity: 0.5,
+        metalness: 0.3,
+        roughness: 0.6,
+        transparent: true,
+        opacity: 0.9
+    });
+    const jointGeo = new THREE.SphereGeometry(0.006, 12, 12);
+
+    FINGER_JOINTS.forEach(name => {
+        const mesh = new THREE.Mesh(jointGeo, jointMat.clone());
+        mesh.visible = false;
+        scene.add(mesh);
+        jointMeshes[name] = mesh;
+    });
+
+    // Bone lines
+    const boneLines = [];
+    const boneMat = new THREE.LineBasicMaterial({ color: COL.cyan, transparent: true, opacity: 0.4 });
+
+    BONE_CONNECTIONS.forEach(() => {
+        const geo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(), new THREE.Vector3()
+        ]);
+        const line = new THREE.Line(geo, boneMat.clone());
+        line.visible = false;
+        scene.add(line);
+        boneLines.push(line);
+    });
+
+    // ── HAND OVERLAY ARROWS (scaffolded mode) ──
+    let fingerOverlayArrow = null;
+    let thumbOverlayArrow = null;
+    let curlIndicator = null;
+
+    const overlayGroup = new THREE.Group();
+    scene.add(overlayGroup);
+
+    function createSmallArrow(color, len) {
+        const dir = new THREE.Vector3(0, 0, 1);
+        const origin = new THREE.Vector3();
+        return new THREE.ArrowHelper(dir, origin, len, color, len * 0.3, len * 0.15);
+    }
+
+    fingerOverlayArrow = createSmallArrow(COL.cyan, 0.1);
+    fingerOverlayArrow.visible = false;
+    overlayGroup.add(fingerOverlayArrow);
+
+    thumbOverlayArrow = createSmallArrow(COL.green, 0.1);
+    thumbOverlayArrow.visible = false;
+    overlayGroup.add(thumbOverlayArrow);
+
+    // Curl indicator: a small torus arc
+    const curlGeo = new THREE.TorusGeometry(0.035, 0.003, 8, 16, Math.PI * 0.75);
+    const curlMat = new THREE.MeshStandardMaterial({
+        color: COL.amber,
+        emissive: COL.amber,
+        emissiveIntensity: 0.5,
+        transparent: true,
+        opacity: 0.8
+    });
+    curlIndicator = new THREE.Mesh(curlGeo, curlMat);
+    curlIndicator.visible = false;
+    overlayGroup.add(curlIndicator);
+
+    // ── HUD PANEL (in-VR) ──
+    function createHUDPanel() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.minFilter = THREE.LinearFilter;
+
+        const geo = new THREE.PlaneGeometry(0.5, 0.25);
+        const mat = new THREE.MeshBasicMaterial({
+            map: tex,
+            transparent: true,
+            depthTest: false,
+            side: THREE.DoubleSide
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(-0.6, 1.6, -0.8);
+        mesh.lookAt(-0.6, 1.6, 0);
+        scene.add(mesh);
+
+        return { canvas, ctx, tex, mesh };
+    }
+
+    const hud = createHUDPanel();
+
+    function updateHUD(feedback) {
+        const { ctx, canvas, tex } = hud;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Background
+        ctx.fillStyle = 'rgba(17, 24, 51, 0.85)';
+        ctx.beginPath();
+        ctx.roundRect(0, 0, 512, 256, 12);
+        ctx.fill();
+
+        // Border
+        ctx.strokeStyle = mode === 'scaffolded' ? '#00e5ff' : '#ffab40';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(2, 2, 508, 252, 12);
+        ctx.stroke();
+
+        // Mode
+        ctx.font = '600 22px Rajdhani, sans-serif';
+        ctx.fillStyle = mode === 'scaffolded' ? '#00e5ff' : '#ffab40';
+        ctx.textAlign = 'left';
+        ctx.fillText(mode === 'scaffolded' ? '◆ SCAFFOLDED' : '◇ PREDICTION', 20, 36);
+
+        // Level
+        ctx.font = '18px "Share Tech Mono", monospace';
+        ctx.fillStyle = '#8892b0';
+        ctx.textAlign = 'right';
+        ctx.fillText(level === 1 ? 'CARDINAL' : 'ARBITRARY', 492, 36);
+
+        // Score
+        ctx.font = 'bold 48px Rajdhani, sans-serif';
+        ctx.fillStyle = '#e0e0e0';
+        ctx.textAlign = 'center';
+        ctx.fillText(score.toString(), 256, 100);
+
+        ctx.font = '16px "Share Tech Mono", monospace';
+        ctx.fillStyle = '#556';
+        ctx.fillText('SCORE', 256, 120);
+
+        // Streak
+        if (streak > 1) {
+            ctx.font = '600 24px Rajdhani, sans-serif';
+            ctx.fillStyle = '#69f0ae';
+            ctx.fillText('🔥 ' + streak + ' streak', 256, 152);
+        }
+
+        // Alignment bar
+        const barX = 40, barY = 180, barW = 432, barH = 16;
+        ctx.fillStyle = '#1a2040';
+        ctx.fillRect(barX, barY, barW, barH);
+
+        const fill = Math.max(0, alignmentScore);
+        const barColor = fill > 0.85 ? '#69f0ae' : fill > 0.5 ? '#ffab40' : '#ff5252';
+        ctx.fillStyle = barColor;
+        ctx.fillRect(barX, barY, barW * fill, barH);
+
+        ctx.font = '14px "Share Tech Mono", monospace';
+        ctx.fillStyle = '#8892b0';
+        ctx.textAlign = 'center';
+        ctx.fillText('THUMB ALIGNMENT', 256, 215);
+
+        // Feedback message
+        if (feedback) {
+            ctx.font = '600 20px Rajdhani, sans-serif';
+            ctx.fillStyle = '#69f0ae';
+            ctx.fillText(feedback, 256, 245);
+        }
+
+        // Hand tracking status
+        if (!handTracked) {
+            ctx.font = '16px "Share Tech Mono", monospace';
+            ctx.fillStyle = '#ff5252';
+            ctx.fillText('✋ Show right hand to begin', 256, 245);
+        }
+
+        tex.needsUpdate = true;
+    }
+
+    // ── MODE SWITCH PANEL (in-VR) ──
+    function createModePanel() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.minFilter = THREE.LinearFilter;
+
+        const geo = new THREE.PlaneGeometry(0.25, 0.12);
+        const mat = new THREE.MeshBasicMaterial({
+            map: tex,
+            transparent: true,
+            depthTest: false,
+            side: THREE.DoubleSide
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(0.6, 1.6, -0.8);
+        mesh.lookAt(0.6, 1.6, 0);
+        scene.add(mesh);
+
+        return { canvas, ctx, tex, mesh };
+    }
+
+    const modePanel = createModePanel();
+
+    function updateModePanel() {
+        const { ctx, canvas, tex } = modePanel;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = 'rgba(17, 24, 51, 0.85)';
+        ctx.beginPath();
+        ctx.roundRect(0, 0, 256, 128, 8);
+        ctx.fill();
+
+        ctx.strokeStyle = '#334';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(2, 2, 252, 124, 8);
+        ctx.stroke();
+
+        ctx.font = '14px "Share Tech Mono", monospace';
+        ctx.fillStyle = '#8892b0';
+        ctx.textAlign = 'center';
+        ctx.fillText('PINCH LEFT TO SWITCH', 128, 30);
+
+        ctx.font = '600 20px Rajdhani, sans-serif';
+
+        // Scaffolded option
+        ctx.fillStyle = mode === 'scaffolded' ? '#00e5ff' : '#334';
+        ctx.fillText('SCAFFOLDED', 128, 65);
+
+        // Prediction option
+        ctx.fillStyle = mode === 'prediction' ? '#ffab40' : '#334';
+        ctx.fillText('PREDICTION', 128, 95);
+
+        tex.needsUpdate = true;
+    }
+
+    // ── PARTICLE EFFECT ──
+    const particleGroup = new THREE.Group();
+    scene.add(particleGroup);
+    let particleActive = false;
+    let particleTime = 0;
+    const particleSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.015, 16, 16),
+        new THREE.MeshStandardMaterial({
+            color: COL.green,
+            emissive: COL.green,
+            emissiveIntensity: 1.0
+        })
+    );
+    particleSphere.visible = false;
+    particleGroup.add(particleSphere);
+
+    // Particle trail
+    const trailPoints = [];
+    for (let i = 0; i < 30; i++) trailPoints.push(new THREE.Vector3());
+    const trailGeo = new THREE.BufferGeometry().setFromPoints(trailPoints);
+    const trailMat = new THREE.LineBasicMaterial({ color: COL.green, transparent: true, opacity: 0.4 });
+    const trailLine = new THREE.Line(trailGeo, trailMat);
+    trailLine.visible = false;
+    particleGroup.add(trailLine);
+
+    function launchParticle() {
+        particleActive = true;
+        particleTime = 0;
+        particleSphere.visible = true;
+        trailLine.visible = true;
+        particleSphere.position.copy(ARROW_ORIGIN);
+        for (let i = 0; i < trailPoints.length; i++) trailPoints[i].copy(ARROW_ORIGIN);
+    }
+
+    function updateParticle(dt) {
+        if (!particleActive) return;
+        particleTime += dt;
+
+        // Move along v, deflect along F
+        const t = particleTime;
+        const pos = ARROW_ORIGIN.clone()
+            .addScaledVector(vDir, t * 0.4)
+            .addScaledVector(fDir, 0.5 * t * t * 0.3);
+
+        particleSphere.position.copy(pos);
+
+        // Update trail
+        for (let i = trailPoints.length - 1; i > 0; i--) {
+            trailPoints[i].copy(trailPoints[i - 1]);
+        }
+        trailPoints[0].copy(pos);
+        trailGeo.setFromPoints(trailPoints);
+
+        if (t > 2.0) {
+            particleActive = false;
+            particleSphere.visible = false;
+            trailLine.visible = false;
+        }
+    }
+
+    // ── CHALLENGE MANAGEMENT ──
+    function nextChallenge() {
+        locked = false;
+        showingResult = false;
+        lockTimer = 0;
+        alignmentScore = 0;
+
+        if (fArrow) { scene.remove(fArrow); fArrow = null; }
+        if (fLabel) { scene.remove(fLabel); fLabel = null; }
+
+        let ch;
+        if (level === 1) {
+            challengeIndex = (challengeIndex + 1) % CARDINAL_CHALLENGES.length;
+            ch = CARDINAL_CHALLENGES[challengeIndex];
+        } else {
+            ch = generateArbitraryChallenge();
+        }
+        currentChallenge = ch;
+
+        vDir.set(ch.v[0], ch.v[1], ch.v[2]).normalize();
+        bDir.set(ch.B[0], ch.B[1], ch.B[2]).normalize();
+        fDir.crossVectors(vDir, bDir).normalize();
+
+        updateArrows();
+        updateLabels();
+    }
+
+    // Shuffle cardinal challenges
+    function shuffleArray(arr) {
+        for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+    }
+    shuffleArray(CARDINAL_CHALLENGES);
+
+    // ── LEFT HAND PINCH DETECTION (for mode switch) ──
+    let leftPinching = false;
+    let prevLeftPinch = false;
+
+    function checkLeftPinch(frame) {
+        const session = renderer.xr.getSession();
+        if (!session || !frame) return;
+        const refSpace = renderer.xr.getReferenceSpace();
+
+        for (const source of session.inputSources) {
+            if (source.hand && source.handedness === 'left') {
+                const thumbTip = source.hand.get('thumb-tip');
+                const indexTip = source.hand.get('index-finger-tip');
+                if (thumbTip && indexTip) {
+                    const tp = frame.getJointPose(thumbTip, refSpace);
+                    const ip = frame.getJointPose(indexTip, refSpace);
+                    if (tp && ip) {
+                        const dist = Math.sqrt(
+                            (tp.transform.position.x - ip.transform.position.x) ** 2 +
+                            (tp.transform.position.y - ip.transform.position.y) ** 2 +
+                            (tp.transform.position.z - ip.transform.position.z) ** 2
+                        );
+                        leftPinching = dist < 0.025;
+                    }
+                }
+                break;
+            }
+        }
+
+        // Toggle on pinch start
+        if (leftPinching && !prevLeftPinch) {
+            if (mode === 'scaffolded') {
+                mode = 'prediction';
+            } else {
+                mode = 'scaffolded';
+            }
+            updateModePanel();
+        }
+        prevLeftPinch = leftPinching;
+    }
+
+    // ── HAND TRACKING UPDATE ──
+    function updateHandTracking(frame) {
+        const session = renderer.xr.getSession();
+        if (!session || !frame) return;
+        const refSpace = renderer.xr.getReferenceSpace();
+
+        let rightHand = null;
+        for (const source of session.inputSources) {
+            if (source.hand && source.handedness === 'right') {
+                rightHand = source.hand;
+                break;
+            }
+        }
+
+        if (!rightHand) {
+            handTracked = false;
+            // Hide all joints
+            FINGER_JOINTS.forEach(name => { jointMeshes[name].visible = false; });
+            boneLines.forEach(line => { line.visible = false; });
+            fingerOverlayArrow.visible = false;
+            thumbOverlayArrow.visible = false;
+            curlIndicator.visible = false;
+            return;
+        }
+
+        let trackedCount = 0;
+        for (const name of FINGER_JOINTS) {
+            const jointSpace = rightHand.get(name);
+            if (jointSpace) {
+                const pose = frame.getJointPose(jointSpace, refSpace);
+                if (pose) {
+                    const p = pose.transform.position;
+                    if (!jointPos[name]) jointPos[name] = new THREE.Vector3();
+                    jointPos[name].set(p.x, p.y, p.z);
+
+                    jointMeshes[name].position.set(p.x, p.y, p.z);
+                    jointMeshes[name].visible = true;
+                    trackedCount++;
+                } else {
+                    jointMeshes[name].visible = false;
+                }
+            }
+        }
+
+        handTracked = trackedCount > 10;
+
+        // Update bone lines
+        BONE_CONNECTIONS.forEach((conn, i) => {
+            const a = jointPos[conn[0]];
+            const b = jointPos[conn[1]];
+            if (a && b && jointMeshes[conn[0]].visible && jointMeshes[conn[1]].visible) {
+                const positions = boneLines[i].geometry.attributes.position;
+                positions.setXYZ(0, a.x, a.y, a.z);
+                positions.setXYZ(1, b.x, b.y, b.z);
+                positions.needsUpdate = true;
+                boneLines[i].visible = true;
+            } else {
+                boneLines[i].visible = false;
+            }
+        });
+    }
+
+    // ── ALIGNMENT COMPUTATION ──
+    function computeAlignment() {
+        if (!handTracked || !currentChallenge) return 0;
+
+        // Thumb direction: thumb-metacarpal → thumb-tip
+        const tBase = jointPos['thumb-metacarpal'];
+        const tTip = jointPos['thumb-tip'];
+        if (!tBase || !tTip) return 0;
+
+        const thumbDir = new THREE.Vector3().subVectors(tTip, tBase).normalize();
+        const dot = thumbDir.dot(fDir);
+
+        return (dot + 1) / 2;  // map [-1, 1] → [0, 1]
+    }
+
+    // ── SCAFFOLD OVERLAY UPDATE ──
+    function updateScaffoldOverlay() {
+        const isScaffolded = mode === 'scaffolded' && !locked && !showingResult;
+        fingerOverlayArrow.visible = isScaffolded;
+        thumbOverlayArrow.visible = isScaffolded;
+        curlIndicator.visible = isScaffolded;
+
+        if (!isScaffolded || !handTracked) {
+            fingerOverlayArrow.visible = false;
+            thumbOverlayArrow.visible = false;
+            curlIndicator.visible = false;
+            return;
+        }
+
+        // Finger arrow: follows index finger direction from index MCP
+        const iMcp = jointPos['index-finger-metacarpal'];
+        const iTip = jointPos['index-finger-tip'];
+        if (iMcp && iTip) {
+            const dir = new THREE.Vector3().subVectors(iTip, iMcp).normalize();
+            fingerOverlayArrow.position.copy(iMcp);
+            fingerOverlayArrow.setDirection(dir);
+        }
+
+        // Thumb arrow: follows thumb direction from thumb metacarpal
+        const tBase = jointPos['thumb-metacarpal'];
+        const tTip = jointPos['thumb-tip'];
+        if (tBase && tTip) {
+            const dir = new THREE.Vector3().subVectors(tTip, tBase).normalize();
+            thumbOverlayArrow.position.copy(tBase);
+            thumbOverlayArrow.setDirection(dir);
+        }
+
+        // Curl indicator near the palm center
+        const wrist = jointPos['wrist'];
+        const midMcp = jointPos['middle-finger-metacarpal'];
+        if (wrist && midMcp) {
+            const palmCenter = new THREE.Vector3().addVectors(wrist, midMcp).multiplyScalar(0.5);
+            curlIndicator.position.copy(palmCenter);
+
+            // Orient curl ring to show B curl direction
+            if (iMcp && iTip) {
+                const fingerDir = new THREE.Vector3().subVectors(iTip, iMcp).normalize();
+                const up = fDir.clone();
+                const quat = new THREE.Quaternion();
+                const mat4 = new THREE.Matrix4().lookAt(
+                    new THREE.Vector3(),
+                    fingerDir,
+                    up
+                );
+                quat.setFromRotationMatrix(mat4);
+                curlIndicator.quaternion.copy(quat);
+            }
+        }
+    }
+
+    // ── HAND COLOR FEEDBACK ──
+    function updateHandColor() {
+        const fill = alignmentScore;
+        let r, g, b;
+        if (fill < 0.5) {
+            // Red to amber
+            const t = fill / 0.5;
+            r = 1.0;
+            g = 0.3 + t * 0.4;
+            b = 0.1;
+        } else {
+            // Amber to green
+            const t = (fill - 0.5) / 0.5;
+            r = 1.0 - t * 0.6;
+            g = 0.7 + t * 0.3;
+            b = 0.1 + t * 0.6;
+        }
+
+        if (locked || showingResult) {
+            r = 0.4; g = 0.94; b = 0.68;  // green on lock
+        }
+
+        const emissiveColor = new THREE.Color(r * 0.4, g * 0.4, b * 0.4);
+        const mainColor = new THREE.Color(r * 0.6, g * 0.6, b * 0.6);
+
+        FINGER_JOINTS.forEach(name => {
+            jointMeshes[name].material.color.copy(mainColor);
+            jointMeshes[name].material.emissive.copy(emissiveColor);
+        });
+
+        boneLines.forEach(line => {
+            line.material.color.copy(mainColor);
+        });
+    }
+
+    // ── VR SESSION ──
+    const statusEl = document.getElementById('status');
+    const enterBtn = document.getElementById('enter-vr');
+
+    async function checkXR() {
+        if (!navigator.xr) {
+            statusEl.textContent = 'WebXR not available in this browser';
+            enterBtn.disabled = true;
+            return;
+        }
+        const supported = await navigator.xr.isSessionSupported('immersive-vr');
+        if (supported) {
+            statusEl.textContent = 'Headset detected — hand tracking required';
+            enterBtn.disabled = false;
+        } else {
+            statusEl.textContent = 'No VR headset detected';
+            enterBtn.disabled = true;
+        }
+    }
+
+    enterBtn.addEventListener('click', async () => {
+        try {
+            const session = await navigator.xr.requestSession('immersive-vr', {
+                optionalFeatures: ['hand-tracking', 'local-floor']
+            });
+            renderer.xr.setSession(session);
+            document.getElementById('overlay').classList.add('hidden');
+
+            // Initialize first challenge
+            nextChallenge();
+            updateModePanel();
+
+            session.addEventListener('end', () => {
+                document.getElementById('overlay').classList.remove('hidden');
+            });
+        } catch (e) {
+            statusEl.textContent = 'Failed to start VR: ' + e.message;
+        }
+    });
+
+    checkXR();
+
+    // ── RENDER LOOP ──
+    const clock = new THREE.Clock();
+
+    renderer.setAnimationLoop((timestamp, frame) => {
+        const dt = clock.getDelta();
+
+        if (frame) {
+            updateHandTracking(frame);
+            checkLeftPinch(frame);
+
+            if (handTracked && currentChallenge && !locked && !showingResult) {
+                alignmentScore = computeAlignment();
+
+                // Lock-in check
+                if (alignmentScore > 0.85) {
+                    lockTimer += dt;
+                    if (lockTimer > 0.8) {
+                        locked = true;
+                        showingResult = true;
+                        resultTimer = 0;
+                        score++;
+                        streak++;
+
+                        // Unlock arbitrary level after 5 streak
+                        if (streak >= 5 && level === 1) {
+                            level = 2;
+                        }
+
+                        showForceArrow();
+                        showForceLabel();
+                        launchParticle();
+                    }
+                } else {
+                    lockTimer = Math.max(0, lockTimer - dt * 2);
+                }
+
+                updateScaffoldOverlay();
+                updateHandColor();
+            }
+
+            if (showingResult) {
+                resultTimer += dt;
+                updateParticle(dt);
+
+                // Alignment stays green during result
+                if (resultTimer > 2.5) {
+                    nextChallenge();
+                }
+            }
+
+            if (!showingResult && handTracked && currentChallenge) {
+                // Check for wrong attempt (thumb clearly opposite for too long)
+                // No penalty — just keep trying
+            }
+
+            updateHUD(
+                locked && showingResult ? '✓ CORRECT!' : null
+            );
+        }
+
+        renderer.render(scene, camera);
+    });
+
+    // ── WINDOW RESIZE ──
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+})();
+</script>
+</body>
+</html>
