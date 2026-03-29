@@ -160,6 +160,13 @@
         ['wrist', 'middle-finger-metacarpal', 'ring-finger-metacarpal'],
         ['wrist', 'ring-finger-metacarpal', 'pinky-finger-metacarpal'],
         ['wrist', 'thumb-metacarpal', 'index-finger-metacarpal'],
+        // Extra palm fill: proximal-to-proximal webbing
+        ['index-finger-metacarpal', 'index-finger-phalanx-proximal', 'middle-finger-metacarpal'],
+        ['middle-finger-metacarpal', 'middle-finger-phalanx-proximal', 'ring-finger-metacarpal'],
+        ['ring-finger-metacarpal', 'ring-finger-phalanx-proximal', 'pinky-finger-metacarpal'],
+        ['index-finger-metacarpal', 'middle-finger-phalanx-proximal', 'middle-finger-metacarpal'],
+        ['middle-finger-metacarpal', 'ring-finger-phalanx-proximal', 'ring-finger-metacarpal'],
+        ['ring-finger-metacarpal', 'pinky-finger-phalanx-proximal', 'pinky-finger-metacarpal'],
     ];
 
     const FINGER_JOINTS = new Set([
@@ -187,29 +194,71 @@
     const tubeGroup = new THREE.Group();
     scene.add(tubeGroup);
 
+    // Per-digit thickness multipliers (relative to base)
+    const DIGIT_SCALE = {
+        'thumb': 1.35,
+        'index-finger': 0.95,
+        'middle-finger': 1.05,
+        'ring-finger': 0.95,
+        'pinky-finger': 0.80,
+    };
+
+    function getDigit(name) {
+        for (const d of ['thumb', 'index-finger', 'middle-finger', 'ring-finger', 'pinky-finger']) {
+            if (name.startsWith(d)) return d;
+        }
+        return null;
+    }
+
     function jr(name) {
-        if (name === 'wrist') return 0.012;
-        if (name.includes('metacarpal')) return 0.009;
-        if (name.includes('proximal')) return 0.008;
-        if (name.includes('intermediate')) return 0.007;
-        if (name.includes('distal')) return 0.0065;
-        if (name.includes('tip')) return 0.006;
+        if (name === 'wrist') return 0.014;
+
+        const digit = getDigit(name);
+        const scale = digit ? DIGIT_SCALE[digit] : 1.0;
+
+        // Base sizes per joint type — knuckle bulges at MCP and proximal
+        if (name.includes('metacarpal')) return 0.010 * scale;
+        if (name.includes('proximal'))   return 0.0095 * scale;  // knuckle bulge
+        if (name.includes('intermediate')) return 0.007 * scale;
+        if (name.includes('distal'))     return 0.006 * scale;
+        if (name.includes('tip'))        return 0.008 * scale;   // fingertip pad — larger
         return 0.007;
     }
+
     function boneR(a, b) {
-        if (a === 'wrist' || b === 'wrist') return 0.006;
-        if (a.includes('metacarpal') && b.includes('metacarpal')) return 0.005;
-        if (a.includes('metacarpal') || b.includes('metacarpal')) return 0.005;
-        if (a.includes('proximal') || b.includes('proximal')) return 0.0045;
-        return 0.004;
+        // Get the thicker end's digit for scaling
+        const digitA = getDigit(a);
+        const digitB = getDigit(b);
+        const digit = digitA || digitB;
+        const scale = digit ? DIGIT_SCALE[digit] : 1.0;
+
+        if (a === 'wrist' || b === 'wrist') return 0.007 * scale;
+        if (a.includes('metacarpal') && b.includes('metacarpal')) return 0.006;
+        if (a.includes('metacarpal') || b.includes('metacarpal')) return 0.006 * scale;
+        if (a.includes('proximal') || b.includes('proximal')) return 0.0055 * scale;
+        if (a.includes('intermediate') || b.includes('intermediate')) return 0.0045 * scale;
+        return 0.004 * scale;
+    }
+
+    // Taper ratio: thicker at start (closer to palm), thinner at end
+    function boneTaper(a, b) {
+        // Return [startRadius, endRadius] multipliers
+        // a is closer to palm, b is further out
+        if (a.includes('metacarpal') && b.includes('proximal')) return [1.0, 0.85];
+        if (a.includes('proximal') && b.includes('intermediate')) return [1.0, 0.75];
+        if (a.includes('intermediate') && b.includes('distal')) return [0.9, 0.65];
+        if (a.includes('distal') && b.includes('tip')) return [0.7, 0.85]; // widens at tip pad
+        return [1.0, 0.9]; // default mild taper
     }
 
     const tubeJoints = {};
     for (const name of JOINT_NAMES) {
-        const geo = new THREE.SphereGeometry(jr(name), 12, 12);
+        const r = jr(name);
+        const segs = name.includes('tip') ? 16 : 12; // rounder fingertips
+        const geo = new THREE.SphereGeometry(r, segs, segs);
         const mat = new THREE.MeshStandardMaterial({
             color: C.joint, emissive: C.joint, emissiveIntensity: 0.2,
-            roughness: 0.4, metalness: 0.1, transparent: true, opacity: 0.92,
+            roughness: 0.28, metalness: 0.15, transparent: true, opacity: 0.94,
         });
         const m = new THREE.Mesh(geo, mat);
         m.visible = false; tubeGroup.add(m); tubeJoints[name] = m;
@@ -217,10 +266,11 @@
 
     const tubeBones = BONES.map(([a, b]) => {
         const r = boneR(a, b);
-        const geo = new THREE.CylinderGeometry(r, r * 0.9, 1, 10, 1);
+        const [taperStart, taperEnd] = boneTaper(a, b);
+        const geo = new THREE.CylinderGeometry(r * taperEnd, r * taperStart, 1, 12, 1);
         const mat = new THREE.MeshStandardMaterial({
             color: C.joint, emissive: C.joint, emissiveIntensity: 0.15,
-            roughness: 0.4, metalness: 0.1, transparent: true, opacity: 0.88,
+            roughness: 0.28, metalness: 0.15, transparent: true, opacity: 0.90,
         });
         const m = new THREE.Mesh(geo, mat);
         m.visible = false; tubeGroup.add(m);
@@ -232,7 +282,8 @@
         geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3));
         const mat = new THREE.MeshStandardMaterial({
             color: C.joint, emissive: C.joint, emissiveIntensity: 0.1,
-            roughness: 0.5, transparent: true, opacity: 0.45, side: THREE.DoubleSide,
+            roughness: 0.3, metalness: 0.12, transparent: true, opacity: 0.55,
+            side: THREE.DoubleSide,
         });
         const m = new THREE.Mesh(geo, mat);
         m.visible = false; tubeGroup.add(m);
