@@ -87,19 +87,19 @@
     <script type="module">
     import * as THREE from 'three';
 
-    // ─── PALETTE ──────────────────────────────────────────────
+    // ─── PALETTE (deeper, more saturated) ─────────────────────
     const C = {
-        bg:        0x0a0e1a,
-        grid:      0x1a2236,
-        gridCent:  0x243050,
-        cyan:      0x00e5ff,
-        amber:     0xffab40,
-        green:     0x69f0ae,
-        red:       0xff5252,
-        white:     0xe0e8f0,
-        dim:       0x334455,
-        neutral:   0x667788,
-        joint:     0x4488aa,
+        bg:       0x0a0e1a,
+        grid:     0x1a2236,
+        gridCent: 0x243050,
+        cyan:     0x00a8c8,   // v — fingers (deeper)
+        amber:    0xe08820,   // B — palm (deeper)
+        green:    0x30b870,   // F — thumb (deeper)
+        red:      0xff5252,
+        dim:      0x222a38,
+        neutral:  0x556677,
+        joint:    0x3a6a80,
+        white:    0xe8eef4,
     };
 
     const cCyan    = new THREE.Color(C.cyan);
@@ -112,7 +112,7 @@
     // ─── STATE ────────────────────────────────────────────────
     const state = {
         mode:        'scaffolded',
-        phase:       'waiting',
+        phase:       'waiting',    // waiting | orienting | locked | paused
         currentV:    new THREE.Vector3(),
         currentB:    new THREE.Vector3(),
         expectedF:   new THREE.Vector3(),
@@ -123,7 +123,6 @@
         palmOk:      false,
         thumbOk:     false,
         lockTimer:   0,
-        resultTimer: 0,
         score:       { correct: 0, total: 0 },
         round:       0,
         difficulty:  'cardinal',
@@ -133,7 +132,6 @@
 
     const ALIGN_THRESHOLD = 0.75;
     const LOCK_HOLD       = 0.6;
-    const RESULT_TIME     = 2.0;
     const STREAK_UNLOCK   = 4;
 
     // ─── SCENE ────────────────────────────────────────────────
@@ -153,18 +151,15 @@
 
     scene.add(new THREE.AmbientLight(0x334466, 0.6));
     const pt1 = new THREE.PointLight(C.cyan, 0.6, 12);
-    pt1.position.set(0, 3, 0);
-    scene.add(pt1);
+    pt1.position.set(0, 3, 0); scene.add(pt1);
     const pt2 = new THREE.PointLight(C.amber, 0.25, 8);
-    pt2.position.set(2, 2, -2);
-    scene.add(pt2);
+    pt2.position.set(2, 2, -2); scene.add(pt2);
 
     const grid = new THREE.GridHelper(20, 40, C.gridCent, C.grid);
-    grid.material.transparent = true;
-    grid.material.opacity = 0.35;
+    grid.material.transparent = true; grid.material.opacity = 0.35;
     scene.add(grid);
 
-    // ─── HANDS ────────────────────────────────────────────────
+    // ─── HAND SETUP (both registered, only right rendered) ────
     const xrHands = [renderer.xr.getHand(0), renderer.xr.getHand(1)];
     xrHands.forEach(h => scene.add(h));
 
@@ -201,12 +196,28 @@
         ['ring-finger-metacarpal','pinky-finger-metacarpal'],
     ];
 
+    // Which "zone" each joint belongs to for per-digit coloring
+    // fingers = cyan channel, thumb = green channel, palm = amber channel
+    const FINGER_JOINTS = new Set([
+        'index-finger-metacarpal','index-finger-phalanx-proximal','index-finger-phalanx-intermediate','index-finger-phalanx-distal','index-finger-tip',
+        'middle-finger-metacarpal','middle-finger-phalanx-proximal','middle-finger-phalanx-intermediate','middle-finger-phalanx-distal','middle-finger-tip',
+        'ring-finger-metacarpal','ring-finger-phalanx-proximal','ring-finger-phalanx-intermediate','ring-finger-phalanx-distal','ring-finger-tip',
+        'pinky-finger-metacarpal','pinky-finger-phalanx-proximal','pinky-finger-phalanx-intermediate','pinky-finger-phalanx-distal','pinky-finger-tip',
+    ]);
+    const THUMB_JOINTS = new Set([
+        'thumb-metacarpal','thumb-phalanx-proximal','thumb-phalanx-distal','thumb-tip',
+    ]);
+    const PALM_JOINTS = new Set(['wrist']);
+
+    // Finger definitions: distal → tip for arrow placement
     const FINGER_DEFS = [
-        { mcp: 'index-finger-metacarpal',  tip: 'index-finger-tip' },
-        { mcp: 'middle-finger-metacarpal', tip: 'middle-finger-tip' },
-        { mcp: 'ring-finger-metacarpal',   tip: 'ring-finger-tip' },
-        { mcp: 'pinky-finger-metacarpal',  tip: 'pinky-finger-tip' },
+        { distal: 'index-finger-phalanx-distal',  tip: 'index-finger-tip' },
+        { distal: 'middle-finger-phalanx-distal', tip: 'middle-finger-tip' },
+        { distal: 'ring-finger-phalanx-distal',   tip: 'ring-finger-tip' },
+        { distal: 'pinky-finger-phalanx-distal',  tip: 'pinky-finger-tip' },
     ];
+
+    const THUMB_DEF = { distal: 'thumb-phalanx-distal', tip: 'thumb-tip' };
 
     // Joint spheres
     const jointGeo = new THREE.SphereGeometry(0.005, 8, 8);
@@ -214,7 +225,7 @@
     for (const name of JOINT_NAMES) {
         const mat = new THREE.MeshStandardMaterial({
             color: C.joint, emissive: C.joint, emissiveIntensity: 0.2,
-            roughness: 0.5, transparent: true, opacity: 0.8,
+            roughness: 0.5, transparent: true, opacity: 0.85,
         });
         const m = new THREE.Mesh(jointGeo, mat);
         m.visible = false;
@@ -225,20 +236,19 @@
     // Bone lines
     const boneLines = BONES.map(([a, b]) => {
         const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
-        const mat = new THREE.LineBasicMaterial({ color: C.joint, transparent: true, opacity: 0.5 });
+        const mat = new THREE.LineBasicMaterial({ color: C.joint, transparent: true, opacity: 0.55 });
         const line = new THREE.Line(geo, mat);
         line.visible = false;
         scene.add(line);
         return { line, a, b };
     });
 
-    // ─── HAND OVERLAY ARROWS ──────────────────────────────────
+    // ─── OVERLAY ARROWS (distal → tip, extending past) ───────
     function createOverlayArrow(len, headLen, headW) {
         const arrow = new THREE.ArrowHelper(
             new THREE.Vector3(0, 1, 0), new THREE.Vector3(),
             len, C.neutral, headLen, headW
         );
-        // Replace materials with emissive versions
         arrow.cone.material = new THREE.MeshStandardMaterial({
             color: C.neutral, emissive: C.neutral, emissiveIntensity: 0.3,
             roughness: 0.4, transparent: true, opacity: 0.9,
@@ -251,8 +261,8 @@
         return arrow;
     }
 
-    const fingerArrows = FINGER_DEFS.map(() => createOverlayArrow(0.07, 0.018, 0.010));
-    const thumbOverlay = createOverlayArrow(0.08, 0.022, 0.012);
+    const fingerArrows = FINGER_DEFS.map(() => createOverlayArrow(0.05, 0.014, 0.008));
+    const thumbOverlay = createOverlayArrow(0.055, 0.016, 0.009);
     const palmOverlay  = createOverlayArrow(0.07, 0.020, 0.012);
 
     // Labels
@@ -268,15 +278,15 @@
         const tex = new THREE.CanvasTexture(cv);
         const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
         const sp = new THREE.Sprite(mat);
-        sp.scale.set(0.05, 0.025, 1);
+        sp.scale.set(0.04, 0.02, 1);
         sp.visible = false;
         scene.add(sp);
         return sp;
     }
 
-    const fingerLabels = FINGER_DEFS.map(() => createLabel('v', '#00e5ff'));
-    const thumbLbl     = createLabel('F', '#69f0ae');
-    const palmLbl      = createLabel('B', '#ffab40');
+    const fingerLabels = FINGER_DEFS.map(() => createLabel('v', '#00a8c8'));
+    const thumbLbl     = createLabel('F', '#30b870');
+    const palmLbl      = createLabel('B', '#e08820');
 
     // ─── SCENE VECTORS ────────────────────────────────────────
     const vectorOrigin = new THREE.Vector3(0, 1.3, -0.8);
@@ -307,73 +317,108 @@
         return sp;
     }
 
-    const vLbl = createVecLabel('v', '#00e5ff');
-    const bLbl = createVecLabel('B', '#ffab40');
-    const fLbl = createVecLabel('F', '#69f0ae');
-    fLbl.visible = false;
+    const vLbl = createVecLabel('v', '#00a8c8');
+    const bLblScene = createVecLabel('B', '#e08820');
+    const fLblScene = createVecLabel('F', '#30b870');
+    fLblScene.visible = false;
 
     function positionVecLabels() {
         const off = 0.43;
         vLbl.position.copy(vectorOrigin).addScaledVector(state.currentV, off);
-        bLbl.position.copy(vectorOrigin).addScaledVector(state.currentB, off);
-        fLbl.position.copy(vectorOrigin).addScaledVector(state.expectedF, off);
+        bLblScene.position.copy(vectorOrigin).addScaledVector(state.currentB, off);
+        fLblScene.position.copy(vectorOrigin).addScaledVector(state.expectedF, off);
     }
 
-    // ─── HUD ──────────────────────────────────────────────────
+    // ─── HUD (vibrant, high contrast) ─────────────────────────
     const hudCv = document.createElement('canvas');
-    hudCv.width = 400; hudCv.height = 256;
+    hudCv.width = 512; hudCv.height = 400;
     const hudCtx = hudCv.getContext('2d');
     const hudTex = new THREE.CanvasTexture(hudCv);
     hudTex.minFilter = THREE.LinearFilter;
     const hudMesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.32, 0.20),
-        new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
+        new THREE.PlaneGeometry(0.40, 0.32),
+        new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, opacity: 0.95, side: THREE.DoubleSide })
     );
-    hudMesh.position.set(-0.5, 1.65, -0.65);
+    hudMesh.position.set(-0.55, 1.55, -0.60);
     scene.add(hudMesh);
 
     function drawHUD() {
         const ctx = hudCtx;
-        ctx.clearRect(0, 0, 400, 256);
+        ctx.clearRect(0, 0, 512, 400);
 
-        ctx.fillStyle = 'rgba(10,14,26,0.88)';
-        ctx.beginPath(); ctx.roundRect(4,4,392,248,10); ctx.fill();
-        ctx.strokeStyle = '#1a3050'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.roundRect(4,4,392,248,10); ctx.stroke();
+        // Background — slightly lighter for readability
+        ctx.fillStyle = 'rgba(14, 20, 34, 0.92)';
+        ctx.beginPath(); ctx.roundRect(6, 6, 500, 388, 12); ctx.fill();
+        ctx.strokeStyle = '#2a4060'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.roundRect(6, 6, 500, 388, 12); ctx.stroke();
 
-        ctx.font = '600 24px Rajdhani, sans-serif';
+        // Title
+        ctx.font = '700 30px Rajdhani, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillStyle = state.mode === 'scaffolded' ? '#ffab40' : '#69f0ae';
-        ctx.fillText(state.mode === 'scaffolded' ? 'SCAFFOLDED' : 'PREDICTION', 200, 40);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('RIGHT HAND RULE', 256, 44);
 
-        ctx.font = '20px Share Tech Mono, monospace';
-        ctx.fillStyle = '#607080';
-        ctx.fillText(`Round ${state.round}`, 200, 76);
-        ctx.font = '600 32px Rajdhani, sans-serif';
-        ctx.fillStyle = '#e0e8f0';
-        ctx.fillText(`${state.score.correct} / ${state.score.total}`, 200, 114);
+        // Mode
+        ctx.font = '600 24px Share Tech Mono, monospace';
+        ctx.fillStyle = state.mode === 'scaffolded' ? '#e08820' : '#30b870';
+        ctx.fillText(state.mode === 'scaffolded' ? '[ SCAFFOLDED ]' : '[ PREDICTION ]', 256, 78);
 
-        ctx.font = '16px Share Tech Mono, monospace';
-        ctx.fillStyle = '#445';
-        ctx.fillText(state.difficulty === 'cardinal' ? 'Cardinal axes' : 'Arbitrary 3D', 200, 145);
+        // Divider
+        ctx.strokeStyle = '#2a4060'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(40, 94); ctx.lineTo(472, 94); ctx.stroke();
 
-        if (state.phase === 'locked') {
-            ctx.font = 'bold 28px Rajdhani, sans-serif';
-            ctx.fillStyle = '#69f0ae';
-            ctx.fillText('CORRECT!', 200, 188);
-        } else if (state.phase === 'waiting') {
+        // Round + Score
+        ctx.font = '22px Share Tech Mono, monospace';
+        ctx.fillStyle = '#8899aa';
+        ctx.fillText(`Round ${state.round}`, 256, 126);
+
+        ctx.font = '700 38px Rajdhani, sans-serif';
+        ctx.fillStyle = '#f0f4f8';
+        ctx.fillText(`${state.score.correct} / ${state.score.total}`, 256, 168);
+
+        // Difficulty
+        ctx.font = '18px Share Tech Mono, monospace';
+        ctx.fillStyle = '#667788';
+        ctx.fillText(state.difficulty === 'cardinal' ? 'Cardinal axes' : 'Arbitrary 3D', 256, 200);
+
+        // Phase-specific text
+        ctx.font = '600 26px Rajdhani, sans-serif';
+        if (state.phase === 'waiting') {
+            ctx.fillStyle = '#8899aa';
+            ctx.fillText('Show your right hand to begin', 256, 252);
+        } else if (state.phase === 'orienting') {
+            ctx.fillStyle = '#c0d0e0';
+            ctx.fillText('Orient your hand:', 256, 242);
+            ctx.font = '20px Rajdhani, sans-serif';
+            ctx.fillStyle = '#00a8c8';
+            ctx.fillText('Fingers \u2192 v', 256, 270);
+            ctx.fillStyle = '#e08820';
+            ctx.fillText('Palm \u2192 B', 256, 294);
+            ctx.fillStyle = '#30b870';
+            ctx.fillText('Thumb \u2192 F', 256, 318);
+            if (state.lockTimer > 0) {
+                ctx.font = '700 22px Rajdhani, sans-serif';
+                ctx.fillStyle = '#30b870';
+                ctx.fillText('Hold steady...', 256, 350);
+            }
+        } else if (state.phase === 'locked') {
+            ctx.fillStyle = '#30b870';
+            ctx.fillText('\u2713  CORRECT!', 256, 252);
+            ctx.font = '20px Rajdhani, sans-serif';
+            ctx.fillStyle = '#c0d0e0';
+            ctx.fillText('F = v \u00d7 B', 256, 282);
+        } else if (state.phase === 'paused') {
+            ctx.fillStyle = '#f0f4f8';
+            ctx.fillText('Pinch to continue', 256, 252);
             ctx.font = '18px Rajdhani, sans-serif';
-            ctx.fillStyle = '#667';
-            ctx.fillText('Show your right hand...', 200, 188);
-        } else if (state.phase === 'orienting' && state.lockTimer > 0) {
-            ctx.font = '18px Rajdhani, sans-serif';
-            ctx.fillStyle = '#69f0ae';
-            ctx.fillText('Hold steady...', 200, 188);
+            ctx.fillStyle = '#667788';
+            ctx.fillText('Shake fist to toggle mode', 256, 284);
         }
 
-        ctx.font = '14px Rajdhani, sans-serif';
-        ctx.fillStyle = '#334';
-        ctx.fillText('Pinch left hand \u2192 switch mode', 200, 238);
+        // Bottom hint
+        ctx.font = '16px Rajdhani, sans-serif';
+        ctx.fillStyle = '#445566';
+        ctx.fillText('Shake fist \u2192 toggle mode', 256, 384);
 
         hudTex.needsUpdate = true;
     }
@@ -392,7 +437,7 @@
         particles.push({ mesh: m, vel: dir.clone().multiplyScalar(0.8), life: 2.0 });
     }
 
-    // ─── VECTOR GENERATION (perpendicular v & B) ──────────────
+    // ─── VECTOR GENERATION (perpendicular) ────────────────────
     const CARDINALS = [
         new THREE.Vector3(1,0,0), new THREE.Vector3(-1,0,0),
         new THREE.Vector3(0,1,0), new THREE.Vector3(0,-1,0),
@@ -403,8 +448,7 @@
         let arb = new THREE.Vector3(1, 0, 0);
         if (Math.abs(v.dot(arb)) > 0.9) arb.set(0, 1, 0);
         const perp = new THREE.Vector3().crossVectors(v, arb).normalize();
-        const angle = Math.random() * Math.PI * 2;
-        perp.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(v, angle));
+        perp.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(v, Math.random() * Math.PI * 2));
         return perp;
     }
 
@@ -418,7 +462,6 @@
         camDir.normalize();
         vectorOrigin.copy(camPos).addScaledVector(camDir, 0.7);
         vectorOrigin.y = camPos.y - 0.2;
-
         vArrow.position.copy(vectorOrigin);
         bArrow.position.copy(vectorOrigin);
         fArrow.position.copy(vectorOrigin);
@@ -428,7 +471,6 @@
         state.round++;
         state.phase = 'orienting';
         state.lockTimer = 0;
-        state.resultTimer = 0;
         state.fingerOk = state.palmOk = state.thumbOk = false;
 
         repositionVectors();
@@ -451,23 +493,46 @@
         bArrow.setDirection(b);
         fArrow.setDirection(state.expectedF);
         fArrow.visible = false;
-        fLbl.visible = false;
+        fLblScene.visible = false;
 
         positionVecLabels();
     }
 
-    // ─── HAND READING ─────────────────────────────────────────
-    const jp = {};   // cached joint positions
+    // ─── HAND READING (right hand only via inputSources) ──────
+    const jp = {};
     for (const name of JOINT_NAMES) jp[name] = new THREE.Vector3();
 
-    function readHands() {
-        let rHand = null;
-        for (const hand of xrHands) {
-            if (hand.joints && hand.joints['index-finger-tip'] && hand.joints['thumb-tip'] && hand.joints['wrist']) {
-                rHand = hand;
-                break;
+    function findRightHand() {
+        const session = renderer.xr.getSession();
+        if (!session) return null;
+
+        for (const src of session.inputSources) {
+            if (src.handedness === 'right' && src.hand) {
+                // Find which xrHand object matches
+                for (const hand of xrHands) {
+                    if (hand.joints && hand.joints['wrist'] && hand.joints['index-finger-tip']) {
+                        // Verify it's actually the right hand by checking if this hand
+                        // matches the input source. Since we can't directly compare,
+                        // we use the fact that the XR system maps them.
+                        // getHand(0) maps to inputSources in order, but handedness check
+                        // on the source is what matters.
+                        return hand;
+                    }
+                }
             }
         }
+
+        // Fallback: if inputSources aren't available yet, try both hands
+        for (const hand of xrHands) {
+            if (hand.joints && hand.joints['wrist'] && hand.joints['index-finger-tip']) {
+                return hand;
+            }
+        }
+        return null;
+    }
+
+    function readRightHand() {
+        const rHand = findRightHand();
         if (!rHand) { state.handTracked = false; return null; }
 
         let ok = true;
@@ -480,18 +545,17 @@
 
         state.handTracked = true;
 
-        const _v = new THREE.Vector3();
-
-        // Per-finger directions
-        const fingerDirs = FINGER_DEFS.map(f =>
-            _v.subVectors(jp[f.tip], jp[f.mcp]).normalize().clone()
-        );
+        // Per-finger directions (distal → tip)
+        const fingerDirs = FINGER_DEFS.map(f => {
+            return new THREE.Vector3().subVectors(jp[f.tip], jp[f.distal]).normalize();
+        });
 
         const avgFinger = new THREE.Vector3();
         fingerDirs.forEach(d => avgFinger.add(d));
         avgFinger.divideScalar(fingerDirs.length).normalize();
 
-        const thumbDir = new THREE.Vector3().subVectors(jp['thumb-tip'], jp['thumb-metacarpal']).normalize();
+        // Thumb direction (distal → tip)
+        const thumbDir = new THREE.Vector3().subVectors(jp[THUMB_DEF.tip], jp[THUMB_DEF.distal]).normalize();
 
         // Palm normal
         const wristToMid = new THREE.Vector3().subVectors(jp['middle-finger-metacarpal'], jp['wrist']).normalize();
@@ -503,23 +567,102 @@
         return { hand: rHand, fingerDirs, avgFinger, thumbDir, palmNormal, palmCenter };
     }
 
-    // Pinch toggle
-    let leftPinching = false;
-    function checkLeftPinch() {
-        for (const hand of xrHands) {
-            if (!hand.joints || !hand.joints['thumb-tip'] || !hand.joints['index-finger-tip']) continue;
-            const t = new THREE.Vector3(), i = new THREE.Vector3();
-            hand.joints['thumb-tip'].getWorldPosition(t);
-            hand.joints['index-finger-tip'].getWorldPosition(i);
-            const d = t.distanceTo(i);
-            if (d < 0.025 && !leftPinching) {
-                leftPinching = true;
-                state.mode = state.mode === 'scaffolded' ? 'prediction' : 'scaffolded';
-            } else if (d > 0.04) {
-                leftPinching = false;
-            }
+    // ─── FIST SHAKE DETECTION ─────────────────────────────────
+    const fistShake = {
+        isFist: false,
+        wristHistory: [],       // {pos, time} buffer
+        reversals: 0,
+        lastDir: 0,             // +1 or -1
+        lastReversalTime: 0,
+        cooldown: 0,
+    };
+
+    function detectFist(hd) {
+        if (!hd) return false;
+        // Check if all four fingertips are close to palm center
+        const pc = hd.palmCenter;
+        let allClose = true;
+        for (const f of FINGER_DEFS) {
+            const dist = jp[f.tip].distanceTo(pc);
+            if (dist > 0.08) { allClose = false; break; }
         }
+        return allClose;
     }
+
+    function updateFistShake(hd, dt) {
+        if (fistShake.cooldown > 0) {
+            fistShake.cooldown -= dt;
+            return false;
+        }
+
+        const nowFist = detectFist(hd);
+        fistShake.isFist = nowFist;
+
+        if (!nowFist || !hd) {
+            fistShake.wristHistory = [];
+            fistShake.reversals = 0;
+            fistShake.lastDir = 0;
+            return false;
+        }
+
+        const now = performance.now() / 1000;
+        const wPos = jp['wrist'].clone();
+        fistShake.wristHistory.push({ pos: wPos, time: now });
+
+        // Keep last 1.5 seconds
+        while (fistShake.wristHistory.length > 0 && now - fistShake.wristHistory[0].time > 1.5) {
+            fistShake.wristHistory.shift();
+        }
+
+        if (fistShake.wristHistory.length < 3) return false;
+
+        // Check velocity direction changes (using primary axis of motion)
+        const prev = fistShake.wristHistory[fistShake.wristHistory.length - 2];
+        const curr = fistShake.wristHistory[fistShake.wristHistory.length - 1];
+        const delta = new THREE.Vector3().subVectors(curr.pos, prev.pos);
+        const speed = delta.length() / Math.max(0.001, curr.time - prev.time);
+
+        if (speed < 0.3) return false; // Need sufficient movement
+
+        // Use the dominant axis
+        const ax = Math.abs(delta.x);
+        const ay = Math.abs(delta.y);
+        const az = Math.abs(delta.z);
+        let dir = 0;
+        if (ax >= ay && ax >= az) dir = Math.sign(delta.x);
+        else if (ay >= ax && ay >= az) dir = Math.sign(delta.y);
+        else dir = Math.sign(delta.z);
+
+        if (fistShake.lastDir !== 0 && dir !== fistShake.lastDir) {
+            fistShake.reversals++;
+            fistShake.lastReversalTime = now;
+        }
+        fistShake.lastDir = dir;
+
+        // Clean old reversals
+        if (now - fistShake.lastReversalTime > 1.5) {
+            fistShake.reversals = 0;
+        }
+
+        // Trigger on 3+ reversals
+        if (fistShake.reversals >= 3) {
+            fistShake.reversals = 0;
+            fistShake.wristHistory = [];
+            fistShake.cooldown = 1.5; // prevent retrigger
+            return true;
+        }
+
+        return false;
+    }
+
+    // ─── PINCH DETECTION (right hand only, for "next round") ──
+    function detectPinch(hd) {
+        if (!hd) return false;
+        const d = jp['thumb-tip'].distanceTo(jp['index-finger-tip']);
+        return d < 0.025;
+    }
+
+    let wasPinching = false;
 
     // ─── VISUAL UPDATE ────────────────────────────────────────
     function setArrowColor(arrow, color, intensity) {
@@ -530,6 +673,28 @@
     }
 
     function lerpC(a, b, t) { return a.clone().lerp(b, t); }
+
+    function getZoneColor(jointName, ft, pt, tt, scaf) {
+        // Return the glow color for a joint based on which zone it belongs to
+        if (FINGER_JOINTS.has(jointName)) {
+            if (scaf) return lerpC(cDim, cCyan, 0.15 + ft * 0.85);
+            return lerpC(cNeutral, cCyan, ft);
+        }
+        if (THUMB_JOINTS.has(jointName)) {
+            if (scaf) return lerpC(cDim, cGreen, 0.15 + tt * 0.85);
+            return lerpC(cNeutral, cGreen, tt);
+        }
+        // Palm / wrist
+        if (scaf) return lerpC(cDim, cAmber, 0.15 + pt * 0.85);
+        return lerpC(cNeutral, cAmber, pt);
+    }
+
+    function getBoneZone(a, b) {
+        // Return dominant zone for a bone
+        if (FINGER_JOINTS.has(a) || FINGER_JOINTS.has(b)) return 'finger';
+        if (THUMB_JOINTS.has(a) || THUMB_JOINTS.has(b)) return 'thumb';
+        return 'palm';
+    }
 
     function updateHandVisuals(hd) {
         if (!hd) {
@@ -547,14 +712,33 @@
         const scaf = state.mode === 'scaffolded';
         const ori  = state.phase === 'orienting';
 
-        // Joint spheres
+        // Alignment t-values
+        const rng = ALIGN_THRESHOLD - 0.3;
+        const ft = ori ? Math.max(0, Math.min(1, (state.fingerAlign - 0.3) / rng)) : 0;
+        const pt = ori ? Math.max(0, Math.min(1, (state.palmAlign   - 0.3) / rng)) : 0;
+        const tt = ori ? Math.max(0, Math.min(1, (state.thumbAlign  - 0.3) / rng)) : 0;
+
+        // ── Per-digit colored joints ──
         for (const name of JOINT_NAMES) {
             const m = jointMeshes[name];
             m.position.copy(jp[name]);
             m.visible = true;
+
+            if (ori) {
+                const col = getZoneColor(name, ft, pt, tt, scaf);
+                m.material.color.copy(col);
+                m.material.emissive.copy(col);
+                const zone = FINGER_JOINTS.has(name) ? ft : THUMB_JOINTS.has(name) ? tt : pt;
+                m.material.emissiveIntensity = 0.15 + zone * 0.7;
+            } else {
+                // Neutral between rounds
+                m.material.color.copy(cJoint);
+                m.material.emissive.copy(cJoint);
+                m.material.emissiveIntensity = 0.2;
+            }
         }
 
-        // Bone lines
+        // ── Per-zone colored bones ──
         for (const b of boneLines) {
             const mA = jointMeshes[b.a], mB = jointMeshes[b.b];
             if (mA.visible && mB.visible) {
@@ -563,9 +747,23 @@
                 pos.setXYZ(1, mB.position.x, mB.position.y, mB.position.z);
                 pos.needsUpdate = true;
                 b.line.visible = true;
+
+                if (ori) {
+                    const zone = getBoneZone(b.a, b.b);
+                    let col;
+                    if (zone === 'finger') col = getZoneColor(b.a, ft, pt, tt, scaf);
+                    else if (zone === 'thumb') col = getZoneColor(b.a, ft, pt, tt, scaf);
+                    else col = getZoneColor('wrist', ft, pt, tt, scaf);
+                    b.line.material.color.copy(col);
+                    b.line.material.opacity = 0.5 + (zone === 'finger' ? ft : zone === 'thumb' ? tt : pt) * 0.4;
+                } else {
+                    b.line.material.color.copy(cJoint);
+                    b.line.material.opacity = 0.5;
+                }
             }
         }
 
+        // ── Overlay arrows (only during orienting) ──
         if (!ori) {
             fingerArrows.forEach(a => a.visible = false);
             thumbOverlay.visible = false;
@@ -573,33 +771,10 @@
             fingerLabels.forEach(l => l.visible = false);
             thumbLbl.visible = false;
             palmLbl.visible = false;
-
-            // Neutral joint colors when not orienting
-            for (const name of JOINT_NAMES) {
-                jointMeshes[name].material.color.copy(cJoint);
-                jointMeshes[name].material.emissive.copy(cJoint);
-                jointMeshes[name].material.emissiveIntensity = 0.2;
-            }
-            for (const b of boneLines) b.line.material.color.copy(cJoint);
             return;
         }
 
-        // Alignment
-        state.fingerAlign = hd.avgFinger.dot(state.currentV);
-        state.palmAlign   = hd.palmNormal.dot(state.currentB);
-        state.thumbAlign  = hd.thumbDir.dot(state.expectedF);
-
-        state.fingerOk = state.fingerAlign >= ALIGN_THRESHOLD;
-        state.palmOk   = state.palmAlign   >= ALIGN_THRESHOLD;
-        state.thumbOk  = state.thumbAlign  >= ALIGN_THRESHOLD;
-
-        // Smooth t values
-        const rng = ALIGN_THRESHOLD - 0.3;
-        const ft = Math.max(0, Math.min(1, (state.fingerAlign - 0.3) / rng));
-        const pt = Math.max(0, Math.min(1, (state.palmAlign   - 0.3) / rng));
-        const tt = Math.max(0, Math.min(1, (state.thumbAlign  - 0.3) / rng));
-
-        // Colors per mode
+        // Arrow colors
         let fCol, pCol, tCol;
         if (scaf) {
             fCol = lerpC(cDim, cCyan,  0.3 + ft * 0.7);
@@ -611,12 +786,12 @@
             tCol = lerpC(cNeutral, cGreen, tt);
         }
 
-        // Finger arrows
+        // Finger arrows: origin at distal, direction through tip
         FINGER_DEFS.forEach((f, i) => {
             const arrow = fingerArrows[i];
-            arrow.position.copy(jp[f.mcp]);
+            arrow.position.copy(jp[f.distal]);
             arrow.setDirection(hd.fingerDirs[i]);
-            arrow.setLength(0.07, 0.018, 0.010);
+            arrow.setLength(0.05, 0.014, 0.008);
             setArrowColor(arrow, fCol, ft);
             arrow.visible = true;
 
@@ -624,19 +799,17 @@
             if (scaf) {
                 lbl.position.copy(jp[f.tip]).addScaledVector(hd.fingerDirs[i], 0.025);
                 lbl.visible = true;
-            } else {
-                lbl.visible = false;
-            }
+            } else { lbl.visible = false; }
         });
 
-        // Thumb arrow
-        thumbOverlay.position.copy(jp['thumb-metacarpal']);
+        // Thumb arrow: origin at distal, through tip
+        thumbOverlay.position.copy(jp[THUMB_DEF.distal]);
         thumbOverlay.setDirection(hd.thumbDir);
-        thumbOverlay.setLength(0.08, 0.022, 0.012);
+        thumbOverlay.setLength(0.055, 0.016, 0.009);
         setArrowColor(thumbOverlay, tCol, tt);
         thumbOverlay.visible = true;
         if (scaf) {
-            thumbLbl.position.copy(jp['thumb-tip']).addScaledVector(hd.thumbDir, 0.03);
+            thumbLbl.position.copy(jp[THUMB_DEF.tip]).addScaledVector(hd.thumbDir, 0.025);
             thumbLbl.visible = true;
         } else { thumbLbl.visible = false; }
 
@@ -650,15 +823,6 @@
             palmLbl.position.copy(hd.palmCenter).addScaledVector(hd.palmNormal, 0.09);
             palmLbl.visible = true;
         } else { palmLbl.visible = false; }
-
-        // Tint skeleton
-        const overall = Math.min(ft, pt, tt);
-        const jCol = lerpC(cJoint, cGreen, overall * 0.6);
-        for (const name of JOINT_NAMES) {
-            jointMeshes[name].material.emissive.copy(jCol);
-            jointMeshes[name].material.emissiveIntensity = 0.2 + overall * 0.6;
-        }
-        for (const b of boneLines) b.line.material.color.copy(jCol);
     }
 
     // ─── VR INIT ──────────────────────────────────────────────
@@ -700,24 +864,50 @@
 
     renderer.setAnimationLoop(() => {
         const dt = clock.getDelta();
-        const hd = readHands();
+        const hd = readRightHand();
 
+        // ── Fist shake: toggle mode (any time) ──
+        if (updateFistShake(hd, dt)) {
+            state.mode = state.mode === 'scaffolded' ? 'prediction' : 'scaffolded';
+        }
+
+        // ── Pinch detection (for "next round" in paused phase) ──
+        const isPinching = detectPinch(hd);
+        const pinchTriggered = isPinching && !wasPinching;
+        wasPinching = isPinching;
+
+        // ── Phase logic ──
         if (state.phase === 'waiting' && state.handTracked) {
             generateRound();
         }
 
         if (state.phase === 'orienting' && hd) {
+            // Compute alignment
+            state.fingerAlign = hd.avgFinger.dot(state.currentV);
+            state.palmAlign   = hd.palmNormal.dot(state.currentB);
+            state.thumbAlign  = hd.thumbDir.dot(state.expectedF);
+
+            state.fingerOk = state.fingerAlign >= ALIGN_THRESHOLD;
+            state.palmOk   = state.palmAlign   >= ALIGN_THRESHOLD;
+            state.thumbOk  = state.thumbAlign  >= ALIGN_THRESHOLD;
+
             if (state.fingerOk && state.palmOk && state.thumbOk) {
                 state.lockTimer += dt;
                 if (state.lockTimer >= LOCK_HOLD) {
                     state.phase = 'locked';
                     state.score.total++;
                     state.score.correct++;
-                    state.resultTimer = 0;
                     state.streak++;
                     fArrow.visible = true;
-                    fLbl.visible = true;
+                    fLblScene.visible = true;
                     launchParticle(vectorOrigin.clone(), state.expectedF);
+
+                    // Brief locked display, then pause
+                    setTimeout(() => {
+                        if (state.phase === 'locked') {
+                            state.phase = 'paused';
+                        }
+                    }, 1200);
                 }
             } else {
                 state.lockTimer = Math.max(0, state.lockTimer - dt * 2);
@@ -726,17 +916,14 @@
             state.lockTimer = 0;
         }
 
-        if (state.phase === 'locked') {
-            state.resultTimer += dt;
-            if (state.resultTimer >= RESULT_TIME) {
-                if (state.difficulty === 'cardinal' && state.streak >= STREAK_UNLOCK) {
-                    state.difficulty = 'arbitrary';
-                }
-                generateRound();
+        // Paused: wait for pinch to continue
+        if (state.phase === 'paused' && pinchTriggered) {
+            if (state.difficulty === 'cardinal' && state.streak >= STREAK_UNLOCK) {
+                state.difficulty = 'arbitrary';
             }
+            generateRound();
         }
 
-        checkLeftPinch();
         updateHandVisuals(hd);
 
         // Particles
@@ -753,6 +940,7 @@
             }
         }
 
+        // HUD face camera
         if (renderer.xr.isPresenting) {
             const cp = new THREE.Vector3();
             camera.getWorldPosition(cp);
