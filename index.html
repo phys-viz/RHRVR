@@ -59,11 +59,13 @@
     const C = {
         bg: 0x0a0e1a, grid: 0x1a2236, gridCent: 0x243050,
         cyan: 0x00a8c8, amber: 0xe08820, green: 0x30b870,
+        greenBright: 0x50ff90,
         dim: 0x222a38, neutral: 0x556677, joint: 0x3a6a80,
     };
     const cCyan = new THREE.Color(C.cyan);
     const cAmber = new THREE.Color(C.amber);
     const cGreen = new THREE.Color(C.green);
+    const cGreenBright = new THREE.Color(C.greenBright);
     const cDim = new THREE.Color(C.dim);
     const cNeutral = new THREE.Color(C.neutral);
     const cJoint = new THREE.Color(C.joint);
@@ -73,18 +75,21 @@
        STATE
     ═══════════════════════════════════════════════════════════ */
     const state = {
-        mode: 'scaffolded', phase: 'waiting',
+        mode: 'scaffolded',
+        phase: 'waiting',
+        // Phases: waiting → orienting → committing → locked → paused
+        // orienting: flat hand, check fingers + palm
+        // committing: fingers+palm aligned, make fist, check thumb
         currentV: new THREE.Vector3(), currentB: new THREE.Vector3(),
         expectedF: new THREE.Vector3(),
         fingerAlign: 0, palmAlign: 0, thumbAlign: 0,
         fingerOk: false, palmOk: false, thumbOk: false,
-        lockTimer: 0,
+        isFist: false, thumbExtended: false,
         score: { correct: 0, total: 0 },
         round: 0, difficulty: 'cardinal', streak: 0,
         handTracked: false, confirmedRightIdx: -1,
     };
     const ALIGN_THRESHOLD = 0.75;
-    const LOCK_HOLD = 0.6;
     const STREAK_UNLOCK = 4;
 
     /* ═══════════════════════════════════════════════════════════
@@ -115,7 +120,6 @@
        HAND SETUP
     ═══════════════════════════════════════════════════════════ */
     const xrHands = [renderer.xr.getHand(0), renderer.xr.getHand(1)];
-    // DO NOT add to scene — we render our own tube hand
 
     const JOINT_NAMES = [
         'wrist',
@@ -173,12 +177,8 @@
     ];
     const THUMB_DEF = { distal: 'thumb-phalanx-distal', tip: 'thumb-tip' };
 
-    // Joint positions for both hands (for spatial detection)
     const jp = {};
     for (const n of JOINT_NAMES) jp[n] = new THREE.Vector3();
-    const jp0 = {}; // hand 0 wrist
-    const jp1 = {}; // hand 1 wrist
-    for (const n of JOINT_NAMES) { jp0[n] = new THREE.Vector3(); jp1[n] = new THREE.Vector3(); }
 
     /* ═══════════════════════════════════════════════════════════
        TUBE HAND
@@ -281,13 +281,13 @@
     const palmLbl = createLabel('B', '#e08820');
 
     /* ═══════════════════════════════════════════════════════════
-       SCENE VECTORS — positioned near right hand area + tether
+       SCENE VECTORS
     ═══════════════════════════════════════════════════════════ */
     const vectorOrigin = new THREE.Vector3(0, 1.3, -0.8);
-    const vectorTarget = new THREE.Vector3(); // where vectors want to be
+    const vectorTarget = new THREE.Vector3();
     const ARROW_LEN = 0.35;
-    const TETHER_SPEED = 1.2;     // units/sec drift back
-    const TETHER_ANGLE = 0.65;    // radians (~37°) from gaze before tether kicks in
+    const TETHER_SPEED = 1.2;
+    const TETHER_ANGLE = 0.65;
 
     function makeSceneArrow(color) {
         const arrow = new THREE.ArrowHelper(
@@ -309,8 +309,8 @@
     const fArrow = makeSceneArrow(C.green);
     fArrow.visible = false;
 
-    const SCENE_ARROW_BASE_EMISSIVE = 0.3;
-    const SCENE_ARROW_MAX_EMISSIVE  = 1.2;
+    const SCENE_ARROW_BASE = 0.3;
+    const SCENE_ARROW_MAX  = 1.2;
 
     function createVecLabel(text, cssColor) {
         const cv = document.createElement('canvas');
@@ -340,23 +340,16 @@
         fLblScene.position.copy(vectorOrigin).addScaledVector(state.expectedF, off);
     }
 
-    // Compute ideal vector position: chest height, slightly right and forward
     function computeVectorTarget() {
         const camPos = new THREE.Vector3();
         const camDir = new THREE.Vector3();
         const camRight = new THREE.Vector3();
         camera.getWorldPosition(camPos);
         camera.getWorldDirection(camDir);
-
-        // Horizontal forward
         camDir.y = 0;
         if (camDir.lengthSq() < 0.001) camDir.set(0, 0, -1);
         camDir.normalize();
-
-        // Camera right
         camRight.crossVectors(camDir, UP).normalize();
-
-        // Position: 0.55m forward, 0.2m right, chest height (0.35m below eyes)
         vectorTarget.copy(camPos)
             .addScaledVector(camDir, 0.55)
             .addScaledVector(camRight, 0.20);
@@ -371,23 +364,18 @@
     }
 
     function tetherVectors(dt) {
-        // Check angle between gaze and direction-to-vectors
         const camPos = new THREE.Vector3();
         const camDir = new THREE.Vector3();
         camera.getWorldPosition(camPos);
         camera.getWorldDirection(camDir);
-
-        const toVectors = new THREE.Vector3().subVectors(vectorOrigin, camPos).normalize();
-        const angle = Math.acos(Math.max(-1, Math.min(1, camDir.dot(toVectors))));
-
+        const toVec = new THREE.Vector3().subVectors(vectorOrigin, camPos).normalize();
+        const angle = Math.acos(Math.max(-1, Math.min(1, camDir.dot(toVec))));
         if (angle > TETHER_ANGLE) {
-            // Drift vectorOrigin toward target
             computeVectorTarget();
             const drift = new THREE.Vector3().subVectors(vectorTarget, vectorOrigin);
-            const driftDist = drift.length();
-            if (driftDist > 0.001) {
-                const step = Math.min(driftDist, TETHER_SPEED * dt);
-                vectorOrigin.addScaledVector(drift.normalize(), step);
+            const d = drift.length();
+            if (d > 0.001) {
+                vectorOrigin.addScaledVector(drift.normalize(), Math.min(d, TETHER_SPEED * dt));
                 vArrow.position.copy(vectorOrigin);
                 bArrow.position.copy(vectorOrigin);
                 fArrow.position.copy(vectorOrigin);
@@ -432,10 +420,8 @@
 
         ctx.font = '22px Share Tech Mono, monospace'; ctx.fillStyle = '#8899aa';
         ctx.fillText(`Round ${state.round}`, 256, 126);
-
         ctx.font = '700 38px Rajdhani, sans-serif'; ctx.fillStyle = '#f0f4f8';
         ctx.fillText(`${state.score.correct} / ${state.score.total}`, 256, 168);
-
         ctx.font = '18px Share Tech Mono, monospace'; ctx.fillStyle = '#667788';
         ctx.fillText(state.difficulty === 'cardinal' ? 'Cardinal axes' : 'Arbitrary 3D', 256, 200);
 
@@ -445,17 +431,31 @@
             ctx.fillText('Show your right hand to begin', 256, 252);
         } else if (state.phase === 'orienting') {
             ctx.fillStyle = '#c0d0e0';
-            ctx.fillText('Orient your right hand:', 256, 242);
+            ctx.fillText('Orient your flat hand:', 256, 240);
             ctx.font = '22px Rajdhani, sans-serif';
-            ctx.fillStyle = '#00a8c8'; ctx.fillText('Fingers \u2192 v', 256, 272);
-            ctx.fillStyle = '#e08820'; ctx.fillText('Palm faces \u2192 B', 256, 298);
-            ctx.fillStyle = '#30b870'; ctx.fillText('Thumb \u2192 F', 256, 324);
-            if (state.lockTimer > 0) {
-                ctx.font = '700 24px Rajdhani, sans-serif'; ctx.fillStyle = '#30b870';
-                ctx.fillText('\u25cf  Hold steady...', 256, 358);
+
+            // Show check marks for aligned zones
+            ctx.fillStyle = state.fingerOk ? '#50ff90' : '#00a8c8';
+            ctx.fillText((state.fingerOk ? '\u2713 ' : '') + 'Fingers \u2192 v', 256, 270);
+            ctx.fillStyle = state.palmOk ? '#50ff90' : '#e08820';
+            ctx.fillText((state.palmOk ? '\u2713 ' : '') + 'Palm faces \u2192 B', 256, 296);
+
+            if (state.fingerOk && state.palmOk) {
+                ctx.font = '700 24px Rajdhani, sans-serif';
+                ctx.fillStyle = '#50ff90';
+                ctx.fillText('\u2191 Make a fist \u2014 extend thumb!', 256, 336);
             }
+        } else if (state.phase === 'committing') {
+            ctx.fillStyle = '#50ff90';
+            ctx.fillText('Fist detected!', 256, 240);
+            ctx.font = '22px Rajdhani, sans-serif';
+            ctx.fillStyle = '#c0d0e0';
+            ctx.fillText('Point your thumb along F...', 256, 272);
+
+            ctx.fillStyle = state.thumbOk ? '#50ff90' : '#8899aa';
+            ctx.fillText((state.thumbOk ? '\u2713 ' : '') + 'Thumb \u2192 F', 256, 302);
         } else if (state.phase === 'locked') {
-            ctx.fillStyle = '#30b870'; ctx.font = 'bold 32px Rajdhani, sans-serif';
+            ctx.fillStyle = '#50ff90'; ctx.font = 'bold 32px Rajdhani, sans-serif';
             ctx.fillText('\u2713  CORRECT!', 256, 252);
             ctx.font = '22px Rajdhani, sans-serif'; ctx.fillStyle = '#c0d0e0';
             ctx.fillText('F = v \u00d7 B', 256, 286);
@@ -480,7 +480,7 @@
     const particles = [];
     function launchParticle(origin, dir) {
         const mat = new THREE.MeshStandardMaterial({
-            color: C.green, emissive: C.green, emissiveIntensity: 0.8, transparent: true,
+            color: C.greenBright, emissive: C.greenBright, emissiveIntensity: 0.8, transparent: true,
         });
         const m = new THREE.Mesh(pGeo, mat);
         m.position.copy(origin); scene.add(m);
@@ -507,27 +507,24 @@
     function isComfortableV(v) {
         const camDir = new THREE.Vector3();
         camera.getWorldDirection(camDir);
-        if (-v.dot(camDir) > 0.5) return false; // toward user
-        if (v.y < -0.8) return false;            // straight down
+        if (-v.dot(camDir) > 0.5) return false;
+        if (v.y < -0.8) return false;
         return true;
     }
 
     function generateRound() {
         state.round++;
         state.phase = 'orienting';
-        state.lockTimer = 0;
         state.fingerOk = state.palmOk = state.thumbOk = false;
+        state.isFist = false; state.thumbExtended = false;
 
-        // Position vectors near right hand area
         computeVectorTarget();
         snapVectorsToTarget();
 
         let v, b, attempts = 0;
         if (state.difficulty === 'cardinal') {
-            do {
-                v = CARDINALS[Math.floor(Math.random() * 6)].clone();
-                attempts++;
-            } while (!isComfortableV(v) && attempts < 30);
+            do { v = CARDINALS[Math.floor(Math.random() * 6)].clone(); attempts++; }
+            while (!isComfortableV(v) && attempts < 30);
             const perps = CARDINALS.filter(c => Math.abs(c.dot(v)) < 0.1);
             b = perps[Math.floor(Math.random() * perps.length)].clone();
         } else {
@@ -542,15 +539,12 @@
         state.currentB.copy(b);
         state.expectedF.crossVectors(v, b).normalize();
 
-        vArrow.setDirection(v);
-        bArrow.setDirection(b);
+        vArrow.setDirection(v); bArrow.setDirection(b);
         fArrow.setDirection(state.expectedF);
-        fArrow.visible = false;
-        fLblScene.visible = false;
+        fArrow.visible = false; fLblScene.visible = false;
 
-        setSceneArrowEmissive(vArrow, SCENE_ARROW_BASE_EMISSIVE);
-        setSceneArrowEmissive(bArrow, SCENE_ARROW_BASE_EMISSIVE);
-
+        setSceneArrowEmissive(vArrow, SCENE_ARROW_BASE);
+        setSceneArrowEmissive(bArrow, SCENE_ARROW_BASE);
         positionVecLabels();
     }
 
@@ -558,7 +552,6 @@
        SPATIAL RIGHT-HAND DETECTION
     ═══════════════════════════════════════════════════════════ */
     function findRightHandSpatial() {
-        // Read wrist positions from both hand objects
         const wrists = [];
         for (let i = 0; i < 2; i++) {
             const hand = xrHands[i];
@@ -568,60 +561,41 @@
                 wrists.push({ idx: i, pos: wPos });
             }
         }
-
         if (wrists.length === 0) return -1;
-        if (wrists.length === 1) return wrists[0].idx; // only one hand visible
+        if (wrists.length === 1) return wrists[0].idx;
 
-        // Both hands visible: use spatial detection
         const camPos = new THREE.Vector3();
         const camDir = new THREE.Vector3();
         camera.getWorldPosition(camPos);
         camera.getWorldDirection(camDir);
-
-        // Camera right vector (horizontal)
         camDir.y = 0;
         if (camDir.lengthSq() < 0.001) camDir.set(0, 0, -1);
         camDir.normalize();
         const camRight = new THREE.Vector3().crossVectors(camDir, UP).normalize();
-
-        // Dot each wrist with camera right — higher = more to the right
         const d0 = new THREE.Vector3().subVectors(wrists[0].pos, camPos).dot(camRight);
         const d1 = new THREE.Vector3().subVectors(wrists[1].pos, camPos).dot(camRight);
-
-        // Return whichever is further right
         return d0 > d1 ? wrists[0].idx : wrists[1].idx;
     }
 
     let lastHandData = null;
 
     function readRightHand() {
-        // Spatial detection every frame
         const detected = findRightHandSpatial();
-        if (detected >= 0) {
-            state.confirmedRightIdx = detected;
-        }
-
-        if (state.confirmedRightIdx < 0) {
-            state.handTracked = false;
-            return null;
-        }
+        if (detected >= 0) state.confirmedRightIdx = detected;
+        if (state.confirmedRightIdx < 0) { state.handTracked = false; return null; }
 
         const rHand = xrHands[state.confirmedRightIdx];
-        if (!rHand.joints || !rHand.joints['wrist']) {
-            state.handTracked = false;
-            return null;
-        }
+        if (!rHand.joints || !rHand.joints['wrist']) { state.handTracked = false; return null; }
 
         let ok = true;
         for (const name of JOINT_NAMES) {
-            if (rHand.joints[name]) {
-                rHand.joints[name].getWorldPosition(jp[name]);
-            } else { ok = false; }
+            if (rHand.joints[name]) rHand.joints[name].getWorldPosition(jp[name]);
+            else ok = false;
         }
         if (!ok) { state.handTracked = false; return null; }
-
         state.handTracked = true;
 
+        // Finger directions (distal → tip)
         const fingerDirs = FINGER_DEFS.map(f =>
             new THREE.Vector3().subVectors(jp[f.tip], jp[f.distal]).normalize()
         );
@@ -629,10 +603,12 @@
         fingerDirs.forEach(d => avgFinger.add(d));
         avgFinger.divideScalar(fingerDirs.length).normalize();
 
+        // Thumb direction
         const thumbDir = new THREE.Vector3().subVectors(
             jp[THUMB_DEF.tip], jp[THUMB_DEF.distal]
         ).normalize();
 
+        // Palm normal
         const wristToMid = new THREE.Vector3().subVectors(
             jp['middle-finger-metacarpal'], jp['wrist']
         ).normalize();
@@ -645,35 +621,35 @@
             jp['wrist'], jp['middle-finger-metacarpal']
         ).multiplyScalar(0.5);
 
+        // Fist detection: fingertips close to palm center
+        let fistClosed = true;
+        for (const f of FINGER_DEFS) {
+            if (jp[f.tip].distanceTo(palmCenter) > 0.08) { fistClosed = false; break; }
+        }
+
+        // Thumb extended: thumb tip far from palm center
+        const thumbDist = jp[THUMB_DEF.tip].distanceTo(palmCenter);
+        const thumbExt = thumbDist > 0.08;
+
+        state.isFist = fistClosed;
+        state.thumbExtended = thumbExt;
+
         lastHandData = { fingerDirs, avgFinger, thumbDir, palmNormal, palmCenter };
         return lastHandData;
     }
 
     /* ═══════════════════════════════════════════════════════════
-       FIST SHAKE
+       FIST SHAKE (mode toggle — separate from commit fist)
     ═══════════════════════════════════════════════════════════ */
     const fistShake = {
         wristHistory: [], reversals: 0, lastDir: 0,
         lastReversalTime: 0, cooldown: 0,
     };
 
-    function detectFist() {
-        if (!state.handTracked) return false;
-        const pc = new THREE.Vector3().addVectors(
-            jp['wrist'], jp['middle-finger-metacarpal']
-        ).multiplyScalar(0.5);
-        for (const f of FINGER_DEFS) {
-            if (jp[f.tip].distanceTo(pc) > 0.08) return false;
-        }
-        return true;
-    }
-
     function updateFistShake(dt) {
         if (fistShake.cooldown > 0) { fistShake.cooldown -= dt; return false; }
-        if (!detectFist()) {
-            fistShake.wristHistory = [];
-            fistShake.reversals = 0;
-            fistShake.lastDir = 0;
+        if (!state.isFist) {
+            fistShake.wristHistory = []; fistShake.reversals = 0; fistShake.lastDir = 0;
             return false;
         }
         const now = performance.now() / 1000;
@@ -695,22 +671,19 @@
         else dir = Math.sign(delta.z);
 
         if (fistShake.lastDir !== 0 && dir !== fistShake.lastDir) {
-            fistShake.reversals++;
-            fistShake.lastReversalTime = now;
+            fistShake.reversals++; fistShake.lastReversalTime = now;
         }
         fistShake.lastDir = dir;
         if (now - fistShake.lastReversalTime > 1.5) fistShake.reversals = 0;
         if (fistShake.reversals >= 3) {
-            fistShake.reversals = 0;
-            fistShake.wristHistory = [];
-            fistShake.cooldown = 1.5;
-            return true;
+            fistShake.reversals = 0; fistShake.wristHistory = [];
+            fistShake.cooldown = 1.5; return true;
         }
         return false;
     }
 
     /* ═══════════════════════════════════════════════════════════
-       PINCH
+       PINCH (for "next round" in paused phase)
     ═══════════════════════════════════════════════════════════ */
     let wasPinching = false;
     function detectPinch() {
@@ -719,7 +692,7 @@
     }
 
     /* ═══════════════════════════════════════════════════════════
-       COLOR / PULSE
+       COLOR / PULSE HELPERS
     ═══════════════════════════════════════════════════════════ */
     function lerpC(a, b, t) { return a.clone().lerp(b, t); }
 
@@ -741,12 +714,35 @@
         arrow.cone.material.emissiveIntensity = intensity;
     }
 
-    function getZoneColor(jointName, ft, pt, tt, scaf) {
-        if (FINGER_JOINTS.has(jointName))
-            return scaf ? lerpC(cDim, cCyan, 0.15 + ft * 0.85) : lerpC(cNeutral, cCyan, ft);
-        if (THUMB_JOINTS.has(jointName))
-            return scaf ? lerpC(cDim, cGreen, 0.15 + tt * 0.85) : lerpC(cNeutral, cGreen, tt);
-        return scaf ? lerpC(cDim, cAmber, 0.15 + pt * 0.85) : lerpC(cNeutral, cAmber, pt);
+    // Zone colors: base color → green snap when aligned
+    function getFingerColor(ft, aligned, scaf) {
+        if (aligned) return cGreenBright;
+        if (scaf) return lerpC(cDim, cCyan, 0.3 + ft * 0.7);
+        return lerpC(cNeutral, cCyan, ft);
+    }
+
+    function getPalmColor(pt, aligned, scaf) {
+        if (aligned) return cGreenBright;
+        if (scaf) return lerpC(cDim, cAmber, 0.3 + pt * 0.7);
+        return lerpC(cNeutral, cAmber, pt);
+    }
+
+    function getThumbColor(tt, aligned, scaf) {
+        if (aligned) return cGreenBright;
+        if (scaf) return lerpC(cDim, cGreen, 0.15 + tt * 0.85);
+        return lerpC(cNeutral, cGreen, tt);
+    }
+
+    function getZoneColor(jointName, ft, pt, tt, fOk, pOk, tOk, scaf) {
+        if (FINGER_JOINTS.has(jointName)) return getFingerColor(ft, fOk, scaf);
+        if (THUMB_JOINTS.has(jointName)) return getThumbColor(tt, tOk, scaf);
+        return getPalmColor(pt, pOk, scaf);
+    }
+
+    function getZoneAligned(jointName, fOk, pOk, tOk) {
+        if (FINGER_JOINTS.has(jointName)) return fOk;
+        if (THUMB_JOINTS.has(jointName)) return tOk;
+        return pOk;
     }
 
     function getZoneT(jn, ft, pt, tt) {
@@ -764,26 +760,28 @@
     /* ═══════════════════════════════════════════════════════════
        VISUAL UPDATES
     ═══════════════════════════════════════════════════════════ */
-    function updateTubeHand(ft, pt, tt, scaf, show, time) {
+    function updateTubeHand(ft, pt, tt, fOk, pOk, tOk, scaf, show, time) {
         if (!show) {
             for (const n in tubeJoints) tubeJoints[n].visible = false;
             for (const b of tubeBones) b.mesh.visible = false;
             for (const w of palmWebs) w.mesh.visible = false;
             return;
         }
-        const pF = pulseMultiplier(ft, time);
-        const pP = pulseMultiplier(pt, time);
-        const pT = pulseMultiplier(tt, time);
+
+        const pF = fOk ? 1.0 : pulseMultiplier(ft, time);
+        const pP = pOk ? 1.0 : pulseMultiplier(pt, time);
+        const pT = tOk ? 1.0 : pulseMultiplier(tt, time);
 
         for (const name of JOINT_NAMES) {
             const m = tubeJoints[name];
             m.position.copy(jp[name]); m.visible = true;
-            const col = getZoneColor(name, ft, pt, tt, scaf);
+            const col = getZoneColor(name, ft, pt, tt, fOk, pOk, tOk, scaf);
+            const aligned = getZoneAligned(name, fOk, pOk, tOk);
             const zt = getZoneT(name, ft, pt, tt);
             const p = FINGER_JOINTS.has(name) ? pF : THUMB_JOINTS.has(name) ? pT : pP;
             m.material.color.copy(col);
             m.material.emissive.copy(col);
-            m.material.emissiveIntensity = (0.15 + zt * 0.7) * p;
+            m.material.emissiveIntensity = aligned ? 0.9 : (0.15 + zt * 0.7) * p;
         }
 
         for (const b of tubeBones) {
@@ -798,12 +796,13 @@
             b.mesh.scale.set(1, len, 1);
             b.mesh.visible = true;
             const zone = getBoneZone(b.a, b.b);
+            const col = getZoneColor(b.a, ft, pt, tt, fOk, pOk, tOk, scaf);
+            const aligned = zone === 'finger' ? fOk : zone === 'thumb' ? tOk : pOk;
             const zt = zone === 'finger' ? ft : zone === 'thumb' ? tt : pt;
             const p = zone === 'finger' ? pF : zone === 'thumb' ? pT : pP;
-            const col = getZoneColor(b.a, ft, pt, tt, scaf);
             b.mesh.material.color.copy(col);
             b.mesh.material.emissive.copy(col);
-            b.mesh.material.emissiveIntensity = (0.1 + zt * 0.6) * p;
+            b.mesh.material.emissiveIntensity = aligned ? 0.8 : (0.1 + zt * 0.6) * p;
         }
 
         for (const w of palmWebs) {
@@ -814,14 +813,14 @@
             pos.needsUpdate = true;
             w.mesh.geometry.computeVertexNormals();
             w.mesh.visible = true;
-            const col = getZoneColor('wrist', ft, pt, tt, scaf);
+            const col = getPalmColor(pt, pOk, scaf);
             w.mesh.material.color.copy(col);
             w.mesh.material.emissive.copy(col);
-            w.mesh.material.emissiveIntensity = (0.08 + pt * 0.4) * pP;
+            w.mesh.material.emissiveIntensity = pOk ? 0.6 : (0.08 + pt * 0.4) * pP;
         }
     }
 
-    function updateOverlayArrows(hd, ft, pt, tt, scaf, show, time) {
+    function updateOverlayArrows(hd, ft, pt, tt, fOk, pOk, tOk, scaf, show, time, phase) {
         if (!show || !hd) {
             fingerArrows.forEach(a => a.visible = false);
             thumbOverlay.visible = false; palmOverlay.visible = false;
@@ -829,68 +828,83 @@
             thumbLbl.visible = false; palmLbl.visible = false;
             return;
         }
-        const pF = pulseMultiplier(ft, time);
-        const pT = pulseMultiplier(tt, time);
-        const pP = pulseMultiplier(pt, time);
 
-        let fCol, pCol, tCol;
-        if (scaf) {
-            fCol = lerpC(cDim, cCyan,  0.3 + ft * 0.7);
-            pCol = lerpC(cDim, cAmber, 0.3 + pt * 0.7);
-            tCol = lerpC(cDim, cGreen, 0.3 + tt * 0.7);
-        } else {
-            fCol = lerpC(cNeutral, cCyan,  ft);
-            pCol = lerpC(cNeutral, cAmber, pt);
-            tCol = lerpC(cNeutral, cGreen, tt);
-        }
+        const pF = fOk ? 1.0 : pulseMultiplier(ft, time);
+        const pT = tOk ? 1.0 : pulseMultiplier(tt, time);
+        const pP = pOk ? 1.0 : pulseMultiplier(pt, time);
 
+        const fCol = getFingerColor(ft, fOk, scaf);
+        const pCol = getPalmColor(pt, pOk, scaf);
+        const tCol = getThumbColor(tt, tOk, scaf);
+
+        // Finger arrows (visible during orienting)
+        const showFingers = phase === 'orienting' || phase === 'locked' || phase === 'paused';
         FINGER_DEFS.forEach((f, i) => {
             const arrow = fingerArrows[i];
-            arrow.position.copy(jp[f.distal]);
-            arrow.setDirection(hd.fingerDirs[i]);
-            arrow.setLength(0.05, 0.014, 0.008);
-            setArrowColor(arrow, fCol, ft * pF);
-            arrow.visible = true;
-            if (scaf) {
-                fingerLabels[i].position.copy(jp[f.tip]).addScaledVector(hd.fingerDirs[i], 0.045);
-                fingerLabels[i].visible = true;
-            } else { fingerLabels[i].visible = false; }
+            if (showFingers) {
+                arrow.position.copy(jp[f.distal]);
+                arrow.setDirection(hd.fingerDirs[i]);
+                arrow.setLength(0.05, 0.014, 0.008);
+                setArrowColor(arrow, fCol, fOk ? 1.0 : ft * pF);
+                arrow.visible = true;
+                if (scaf) {
+                    fingerLabels[i].position.copy(jp[f.tip]).addScaledVector(hd.fingerDirs[i], 0.045);
+                    fingerLabels[i].visible = true;
+                } else { fingerLabels[i].visible = false; }
+            } else {
+                arrow.visible = false;
+                fingerLabels[i].visible = false;
+            }
         });
 
-        thumbOverlay.position.copy(jp[THUMB_DEF.distal]);
-        thumbOverlay.setDirection(hd.thumbDir);
-        thumbOverlay.setLength(0.055, 0.016, 0.009);
-        setArrowColor(thumbOverlay, tCol, tt * pT);
-        thumbOverlay.visible = true;
-        if (scaf) {
-            thumbLbl.position.copy(jp[THUMB_DEF.tip]).addScaledVector(hd.thumbDir, 0.045);
-            thumbLbl.visible = true;
-        } else { thumbLbl.visible = false; }
+        // Thumb arrow (visible during committing + locked + paused)
+        const showThumb = phase === 'committing' || phase === 'locked' || phase === 'paused';
+        if (showThumb) {
+            thumbOverlay.position.copy(jp[THUMB_DEF.distal]);
+            thumbOverlay.setDirection(hd.thumbDir);
+            thumbOverlay.setLength(0.055, 0.016, 0.009);
+            setArrowColor(thumbOverlay, tCol, tOk ? 1.0 : tt * pT);
+            thumbOverlay.visible = true;
+            if (scaf) {
+                thumbLbl.position.copy(jp[THUMB_DEF.tip]).addScaledVector(hd.thumbDir, 0.045);
+                thumbLbl.visible = true;
+            } else { thumbLbl.visible = false; }
+        } else {
+            thumbOverlay.visible = false;
+            thumbLbl.visible = false;
+        }
 
-        palmOverlay.position.copy(hd.palmCenter);
-        palmOverlay.setDirection(hd.palmNormal);
-        palmOverlay.setLength(0.07, 0.020, 0.012);
-        setArrowColor(palmOverlay, pCol, pt * pP);
-        palmOverlay.visible = true;
-        if (scaf) {
-            palmLbl.position.copy(hd.palmCenter).addScaledVector(hd.palmNormal, 0.12);
-            palmLbl.visible = true;
-        } else { palmLbl.visible = false; }
+        // Palm arrow
+        if (showFingers) {
+            palmOverlay.position.copy(hd.palmCenter);
+            palmOverlay.setDirection(hd.palmNormal);
+            palmOverlay.setLength(0.07, 0.020, 0.012);
+            setArrowColor(palmOverlay, pCol, pOk ? 1.0 : pt * pP);
+            palmOverlay.visible = true;
+            if (scaf) {
+                palmLbl.position.copy(hd.palmCenter).addScaledVector(hd.palmNormal, 0.12);
+                palmLbl.visible = true;
+            } else { palmLbl.visible = false; }
+        } else {
+            palmOverlay.visible = false;
+            palmLbl.visible = false;
+        }
     }
 
-    function updateSceneArrows(ft, pt, tt, time) {
-        const vP = pulseMultiplier(ft, time);
-        const vE = SCENE_ARROW_BASE_EMISSIVE + ft * (SCENE_ARROW_MAX_EMISSIVE - SCENE_ARROW_BASE_EMISSIVE);
+    function updateSceneArrows(ft, pt, tt, fOk, pOk, time) {
+        // v arrow responds to finger alignment
+        const vP = fOk ? 1.0 : pulseMultiplier(ft, time);
+        const vE = fOk ? SCENE_ARROW_MAX : SCENE_ARROW_BASE + ft * (SCENE_ARROW_MAX - SCENE_ARROW_BASE);
         setSceneArrowEmissive(vArrow, vE * vP);
 
-        const bP = pulseMultiplier(pt, time);
-        const bE = SCENE_ARROW_BASE_EMISSIVE + pt * (SCENE_ARROW_MAX_EMISSIVE - SCENE_ARROW_BASE_EMISSIVE);
+        // B arrow responds to palm alignment
+        const bP = pOk ? 1.0 : pulseMultiplier(pt, time);
+        const bE = pOk ? SCENE_ARROW_MAX : SCENE_ARROW_BASE + pt * (SCENE_ARROW_MAX - SCENE_ARROW_BASE);
         setSceneArrowEmissive(bArrow, bE * bP);
 
+        // F arrow
         if (fArrow.visible) {
-            const fP = pulseMultiplier(tt, time);
-            const fE = SCENE_ARROW_BASE_EMISSIVE + tt * (SCENE_ARROW_MAX_EMISSIVE - SCENE_ARROW_BASE_EMISSIVE);
-            setSceneArrowEmissive(fArrow, fE * fP);
+            setSceneArrowEmissive(fArrow, SCENE_ARROW_MAX);
         }
     }
 
@@ -919,9 +933,7 @@
                 await renderer.xr.setSession(session);
                 document.getElementById('overlay').style.display = 'none';
                 state.phase = 'waiting';
-            } catch (err) {
-                statusEl.textContent = `VR failed: ${err.message}`;
-            }
+            } catch (err) { statusEl.textContent = `VR failed: ${err.message}`; }
         });
     }
     initVR();
@@ -937,38 +949,50 @@
         elapsed += dt;
         const hd = readRightHand();
 
-        if (updateFistShake(dt))
+        // Fist shake: mode toggle (only when NOT in committing phase to avoid conflict)
+        if (state.phase !== 'committing' && updateFistShake(dt))
             state.mode = state.mode === 'scaffolded' ? 'prediction' : 'scaffolded';
 
+        // Pinch
         const isPinching = detectPinch();
         const pinchTriggered = isPinching && !wasPinching;
         wasPinching = isPinching;
 
-        // Phase logic
+        /* ── PHASE LOGIC ── */
         if (state.phase === 'waiting' && state.handTracked) generateRound();
 
         if (state.phase === 'orienting' && hd) {
+            // Check finger and palm alignment
             state.fingerAlign = hd.avgFinger.dot(state.currentV);
             state.palmAlign   = hd.palmNormal.dot(state.currentB);
-            state.thumbAlign  = hd.thumbDir.dot(state.expectedF);
             state.fingerOk = state.fingerAlign >= ALIGN_THRESHOLD;
             state.palmOk   = state.palmAlign   >= ALIGN_THRESHOLD;
-            state.thumbOk  = state.thumbAlign  >= ALIGN_THRESHOLD;
 
-            if (state.fingerOk && state.palmOk && state.thumbOk) {
-                state.lockTimer += dt;
-                if (state.lockTimer >= LOCK_HOLD) {
-                    state.phase = 'locked';
-                    state.score.total++; state.score.correct++; state.streak++;
-                    fArrow.visible = true; fLblScene.visible = true;
-                    launchParticle(vectorOrigin.clone(), state.expectedF);
-                    setTimeout(() => { if (state.phase === 'locked') state.phase = 'paused'; }, 1200);
-                }
-            } else {
-                state.lockTimer = Math.max(0, state.lockTimer - dt * 2);
+            // Both aligned + fist detected → transition to committing
+            if (state.fingerOk && state.palmOk && state.isFist) {
+                state.phase = 'committing';
             }
-        } else if (state.phase === 'orienting') {
-            state.lockTimer = 0;
+        }
+
+        if (state.phase === 'committing' && hd) {
+            // Check thumb direction
+            state.thumbAlign = hd.thumbDir.dot(state.expectedF);
+            state.thumbOk = state.thumbAlign >= ALIGN_THRESHOLD;
+
+            // If they open their hand, go back to orienting
+            if (!state.isFist) {
+                state.phase = 'orienting';
+                state.thumbOk = false;
+            }
+
+            // Thumb aligned → locked!
+            if (state.thumbOk && state.isFist) {
+                state.phase = 'locked';
+                state.score.total++; state.score.correct++; state.streak++;
+                fArrow.visible = true; fLblScene.visible = true;
+                launchParticle(vectorOrigin.clone(), state.expectedF);
+                setTimeout(() => { if (state.phase === 'locked') state.phase = 'paused'; }, 1500);
+            }
         }
 
         if (state.phase === 'paused' && pinchTriggered) {
@@ -977,32 +1001,43 @@
             generateRound();
         }
 
-        // Tether vectors during active phases
-        if (state.phase === 'orienting' || state.phase === 'locked' || state.phase === 'paused') {
+        // Tether
+        if (state.phase === 'orienting' || state.phase === 'committing' ||
+            state.phase === 'locked' || state.phase === 'paused') {
             tetherVectors(dt);
         }
 
         // Visual params
         const scaf = state.mode === 'scaffolded';
         const rng = ALIGN_THRESHOLD - 0.3;
-        const showAligned = state.phase === 'orienting' || state.phase === 'locked' || state.phase === 'paused';
+        const active = state.phase === 'orienting' || state.phase === 'committing' ||
+                       state.phase === 'locked' || state.phase === 'paused';
+
         let ft = 0, pt = 0, tt = 0;
-        if (showAligned) {
+        if (active) {
             ft = Math.max(0, Math.min(1, (state.fingerAlign - 0.3) / rng));
             pt = Math.max(0, Math.min(1, (state.palmAlign   - 0.3) / rng));
             tt = Math.max(0, Math.min(1, (state.thumbAlign  - 0.3) / rng));
         }
-        if (state.phase === 'locked' || state.phase === 'paused') { ft = 1; pt = 1; tt = 1; }
 
-        updateTubeHand(ft, pt, tt, scaf, state.handTracked, elapsed);
-        const showOverlay = state.handTracked &&
-            (state.phase === 'orienting' || state.phase === 'locked' || state.phase === 'paused');
-        updateOverlayArrows(hd || lastHandData, ft, pt, tt, scaf, showOverlay, elapsed);
+        const fOk = state.fingerOk && active;
+        const pOk = state.palmOk && active;
+        const tOk = state.thumbOk && active;
 
-        if (showAligned) updateSceneArrows(ft, pt, tt, elapsed);
+        // Override to full during locked/paused
+        if (state.phase === 'locked' || state.phase === 'paused') {
+            ft = 1; pt = 1; tt = 1;
+        }
+
+        updateTubeHand(ft, pt, tt, fOk, pOk, tOk, scaf, state.handTracked, elapsed);
+
+        const showOverlay = state.handTracked && active;
+        updateOverlayArrows(hd || lastHandData, ft, pt, tt, fOk, pOk, tOk, scaf, showOverlay, elapsed, state.phase);
+
+        if (active) updateSceneArrows(ft, pt, tt, fOk, pOk, elapsed);
         else {
-            setSceneArrowEmissive(vArrow, SCENE_ARROW_BASE_EMISSIVE);
-            setSceneArrowEmissive(bArrow, SCENE_ARROW_BASE_EMISSIVE);
+            setSceneArrowEmissive(vArrow, SCENE_ARROW_BASE);
+            setSceneArrowEmissive(bArrow, SCENE_ARROW_BASE);
         }
 
         // Particles
