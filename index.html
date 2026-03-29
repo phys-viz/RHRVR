@@ -185,8 +185,26 @@
     ];
     const THUMB_DEF = { distal: 'thumb-phalanx-distal', tip: 'thumb-tip' };
 
-    const jp = {};
-    for (const n of JOINT_NAMES) jp[n] = new THREE.Vector3();
+    const jp = {};      // raw joint positions
+    const sp = {};      // smoothed joint positions
+    for (const n of JOINT_NAMES) {
+        jp[n] = new THREE.Vector3();
+        sp[n] = new THREE.Vector3();
+    }
+    let smoothInited = false;
+    const SMOOTH_FACTOR = 0.5; // 0 = no smoothing, higher = more smoothing
+
+    function smoothJoints() {
+        if (!smoothInited) {
+            // First frame: snap smoothed to raw
+            for (const n of JOINT_NAMES) sp[n].copy(jp[n]);
+            smoothInited = true;
+            return;
+        }
+        for (const n of JOINT_NAMES) {
+            sp[n].lerp(jp[n], 1.0 - SMOOTH_FACTOR);
+        }
+    }
 
     /* ═══════════════════════════════════════════════════════════
        TUBE HAND
@@ -399,19 +417,16 @@
     }
 
     function computeVectorTarget() {
-        const camPos = new THREE.Vector3();
-        const camDir = new THREE.Vector3();
-        const camRight = new THREE.Vector3();
-        camera.getWorldPosition(camPos);
-        camera.getWorldDirection(camDir);
-        camDir.y = 0;
-        if (camDir.lengthSq() < 0.001) camDir.set(0, 0, -1);
-        camDir.normalize();
-        camRight.crossVectors(camDir, UP).normalize();
-        vectorTarget.copy(camPos)
-            .addScaledVector(camDir, 0.55)
-            .addScaledVector(camRight, 0.20);
-        vectorTarget.y = camPos.y - 0.35;
+        camera.getWorldPosition(_camPos);
+        camera.getWorldDirection(_camDir);
+        _camDir.y = 0;
+        if (_camDir.lengthSq() < 0.001) _camDir.set(0, 0, -1);
+        _camDir.normalize();
+        _camRight.crossVectors(_camDir, UP).normalize();
+        vectorTarget.copy(_camPos)
+            .addScaledVector(_camDir, 0.55)
+            .addScaledVector(_camRight, 0.20);
+        vectorTarget.y = _camPos.y - 0.35;
     }
 
     function snapVectorsToTarget() {
@@ -422,18 +437,16 @@
     }
 
     function tetherVectors(dt) {
-        const camPos = new THREE.Vector3();
-        const camDir = new THREE.Vector3();
-        camera.getWorldPosition(camPos);
-        camera.getWorldDirection(camDir);
-        const toVec = new THREE.Vector3().subVectors(vectorOrigin, camPos).normalize();
-        const angle = Math.acos(Math.max(-1, Math.min(1, camDir.dot(toVec))));
+        camera.getWorldPosition(_camPos);
+        camera.getWorldDirection(_camDir);
+        _tmpV.subVectors(vectorOrigin, _camPos).normalize();
+        const angle = Math.acos(Math.max(-1, Math.min(1, _camDir.dot(_tmpV))));
         if (angle > TETHER_ANGLE) {
             computeVectorTarget();
-            const drift = new THREE.Vector3().subVectors(vectorTarget, vectorOrigin);
-            const d = drift.length();
+            _tmpV.subVectors(vectorTarget, vectorOrigin);
+            const d = _tmpV.length();
             if (d > 0.001) {
-                vectorOrigin.addScaledVector(drift.normalize(), Math.min(d, TETHER_SPEED * dt));
+                vectorOrigin.addScaledVector(_tmpV.normalize(), Math.min(d, TETHER_SPEED * dt));
                 vArrow.position.copy(vectorOrigin);
                 bArrow.position.copy(vectorOrigin);
                 fArrow.position.copy(vectorOrigin);
@@ -448,20 +461,16 @@
     const hudTarget = new THREE.Vector3();
 
     function computeHudTarget() {
-        const camPos = new THREE.Vector3();
-        const camDir = new THREE.Vector3();
-        const camRight = new THREE.Vector3();
-        camera.getWorldPosition(camPos);
-        camera.getWorldDirection(camDir);
-        camDir.y = 0;
-        if (camDir.lengthSq() < 0.001) camDir.set(0, 0, -1);
-        camDir.normalize();
-        camRight.crossVectors(camDir, UP).normalize();
-        // To the left of vectors, slightly higher
-        hudTarget.copy(camPos)
-            .addScaledVector(camDir, 0.50)
-            .addScaledVector(camRight, -0.40);
-        hudTarget.y = camPos.y - 0.15;
+        camera.getWorldPosition(_camPos);
+        camera.getWorldDirection(_camDir);
+        _camDir.y = 0;
+        if (_camDir.lengthSq() < 0.001) _camDir.set(0, 0, -1);
+        _camDir.normalize();
+        _camRight.crossVectors(_camDir, UP).normalize();
+        hudTarget.copy(_camPos)
+            .addScaledVector(_camDir, 0.50)
+            .addScaledVector(_camRight, -0.40);
+        hudTarget.y = _camPos.y - 0.15;
     }
 
     function snapHudToTarget() {
@@ -469,18 +478,16 @@
     }
 
     function tetherHud(dt) {
-        const camPos = new THREE.Vector3();
-        const camDir = new THREE.Vector3();
-        camera.getWorldPosition(camPos);
-        camera.getWorldDirection(camDir);
-        const toHud = new THREE.Vector3().subVectors(hudMesh.position, camPos).normalize();
-        const angle = Math.acos(Math.max(-1, Math.min(1, camDir.dot(toHud))));
+        camera.getWorldPosition(_camPos);
+        camera.getWorldDirection(_camDir);
+        _tmpV.subVectors(hudMesh.position, _camPos).normalize();
+        const angle = Math.acos(Math.max(-1, Math.min(1, _camDir.dot(_tmpV))));
         if (angle > TETHER_ANGLE) {
             computeHudTarget();
-            const drift = new THREE.Vector3().subVectors(hudTarget, hudMesh.position);
-            const d = drift.length();
+            _tmpV.subVectors(hudTarget, hudMesh.position);
+            const d = _tmpV.length();
             if (d > 0.001) {
-                hudMesh.position.addScaledVector(drift.normalize(), Math.min(d, TETHER_SPEED * dt));
+                hudMesh.position.addScaledVector(_tmpV.normalize(), Math.min(d, TETHER_SPEED * dt));
             }
         }
     }
@@ -658,33 +665,46 @@
     /* ═══════════════════════════════════════════════════════════
        SPATIAL RIGHT-HAND DETECTION
     ═══════════════════════════════════════════════════════════ */
+    // Pre-allocated vectors for spatial detection and tethering
+    const _camPos = new THREE.Vector3();
+    const _camDir = new THREE.Vector3();
+    const _camRight = new THREE.Vector3();
+    const _wristPos0 = new THREE.Vector3();
+    const _wristPos1 = new THREE.Vector3();
+    const _tmpV = new THREE.Vector3();
+
     function findRightHandSpatial() {
-        const wrists = [];
+        const wristData = []; // lightweight, just idx + reuse pre-allocated
         for (let i = 0; i < 2; i++) {
             const hand = xrHands[i];
             if (hand.joints && hand.joints['wrist'] && hand.joints['index-finger-tip']) {
-                const wPos = new THREE.Vector3();
+                const wPos = i === 0 ? _wristPos0 : _wristPos1;
                 hand.joints['wrist'].getWorldPosition(wPos);
-                wrists.push({ idx: i, pos: wPos });
+                wristData.push({ idx: i, pos: wPos });
             }
         }
-        if (wrists.length === 0) return -1;
-        if (wrists.length === 1) return wrists[0].idx;
+        if (wristData.length === 0) return -1;
+        if (wristData.length === 1) return wristData[0].idx;
 
-        const camPos = new THREE.Vector3();
-        const camDir = new THREE.Vector3();
-        camera.getWorldPosition(camPos);
-        camera.getWorldDirection(camDir);
-        camDir.y = 0;
-        if (camDir.lengthSq() < 0.001) camDir.set(0, 0, -1);
-        camDir.normalize();
-        const camRight = new THREE.Vector3().crossVectors(camDir, UP).normalize();
-        const d0 = new THREE.Vector3().subVectors(wrists[0].pos, camPos).dot(camRight);
-        const d1 = new THREE.Vector3().subVectors(wrists[1].pos, camPos).dot(camRight);
-        return d0 > d1 ? wrists[0].idx : wrists[1].idx;
+        camera.getWorldPosition(_camPos);
+        camera.getWorldDirection(_camDir);
+        _camDir.y = 0;
+        if (_camDir.lengthSq() < 0.001) _camDir.set(0, 0, -1);
+        _camDir.normalize();
+        _camRight.crossVectors(_camDir, UP).normalize();
+        const d0 = _tmpV.subVectors(wristData[0].pos, _camPos).dot(_camRight);
+        const d1 = _tmpV.subVectors(wristData[1].pos, _camPos).dot(_camRight);
+        return d0 > d1 ? wristData[0].idx : wristData[1].idx;
     }
 
     let lastHandData = null;
+    const _fingerDirs = FINGER_DEFS.map(() => new THREE.Vector3());
+    const _avgFinger = new THREE.Vector3();
+    const _thumbDir = new THREE.Vector3();
+    const _wristToMid = new THREE.Vector3();
+    const _idxToPin = new THREE.Vector3();
+    const _palmNormal = new THREE.Vector3();
+    const _palmCenter = new THREE.Vector3();
 
     function readRightHand() {
         const detected = findRightHandSpatial();
@@ -702,46 +722,41 @@
         if (!ok) { state.handTracked = false; return null; }
         state.handTracked = true;
 
-        // Finger directions (distal → tip)
-        const fingerDirs = FINGER_DEFS.map(f =>
-            new THREE.Vector3().subVectors(jp[f.tip], jp[f.distal]).normalize()
-        );
-        const avgFinger = new THREE.Vector3();
-        fingerDirs.forEach(d => avgFinger.add(d));
-        avgFinger.divideScalar(fingerDirs.length).normalize();
+        // Smooth joint positions to reduce tracking jitter
+        smoothJoints();
+
+        // Finger directions (distal → tip) — use smoothed positions, reuse vectors
+        for (let i = 0; i < FINGER_DEFS.length; i++) {
+            const f = FINGER_DEFS[i];
+            _fingerDirs[i].subVectors(sp[f.tip], sp[f.distal]).normalize();
+        }
+        _avgFinger.set(0, 0, 0);
+        _fingerDirs.forEach(d => _avgFinger.add(d));
+        _avgFinger.divideScalar(_fingerDirs.length).normalize();
 
         // Thumb direction
-        const thumbDir = new THREE.Vector3().subVectors(
-            jp[THUMB_DEF.tip], jp[THUMB_DEF.distal]
-        ).normalize();
+        _thumbDir.subVectors(sp[THUMB_DEF.tip], sp[THUMB_DEF.distal]).normalize();
 
         // Palm normal
-        const wristToMid = new THREE.Vector3().subVectors(
-            jp['middle-finger-metacarpal'], jp['wrist']
-        ).normalize();
-        const idxToPin = new THREE.Vector3().subVectors(
-            jp['pinky-finger-metacarpal'], jp['index-finger-metacarpal']
-        ).normalize();
-        const palmNormal = new THREE.Vector3().crossVectors(wristToMid, idxToPin).normalize();
+        _wristToMid.subVectors(sp['middle-finger-metacarpal'], sp['wrist']).normalize();
+        _idxToPin.subVectors(sp['pinky-finger-metacarpal'], sp['index-finger-metacarpal']).normalize();
+        _palmNormal.crossVectors(_wristToMid, _idxToPin).normalize();
 
-        const palmCenter = new THREE.Vector3().addVectors(
-            jp['wrist'], jp['middle-finger-metacarpal']
-        ).multiplyScalar(0.5);
+        _palmCenter.addVectors(sp['wrist'], sp['middle-finger-metacarpal']).multiplyScalar(0.5);
 
         // Fist detection: fingertips close to palm center
         let fistClosed = true;
         for (const f of FINGER_DEFS) {
-            if (jp[f.tip].distanceTo(palmCenter) > 0.08) { fistClosed = false; break; }
+            if (sp[f.tip].distanceTo(_palmCenter) > 0.08) { fistClosed = false; break; }
         }
 
         // Thumb extended: thumb tip far from palm center
-        const thumbDist = jp[THUMB_DEF.tip].distanceTo(palmCenter);
-        const thumbExt = thumbDist > 0.08;
+        const thumbExt = sp[THUMB_DEF.tip].distanceTo(_palmCenter) > 0.08;
 
         state.isFist = fistClosed;
         state.thumbExtended = thumbExt;
 
-        lastHandData = { fingerDirs, avgFinger, thumbDir, palmNormal, palmCenter };
+        lastHandData = { fingerDirs: _fingerDirs, avgFinger: _avgFinger, thumbDir: _thumbDir, palmNormal: _palmNormal, palmCenter: _palmCenter };
         return lastHandData;
     }
 
@@ -760,14 +775,14 @@
             return false;
         }
         const now = performance.now() / 1000;
-        fistShake.wristHistory.push({ pos: jp['wrist'].clone(), time: now });
+        fistShake.wristHistory.push({ pos: sp['wrist'].clone(), time: now });
         while (fistShake.wristHistory.length > 0 && now - fistShake.wristHistory[0].time > 1.5)
             fistShake.wristHistory.shift();
         if (fistShake.wristHistory.length < 3) return false;
 
         const prev = fistShake.wristHistory[fistShake.wristHistory.length - 2];
         const curr = fistShake.wristHistory[fistShake.wristHistory.length - 1];
-        const delta = new THREE.Vector3().subVectors(curr.pos, prev.pos);
+        const delta = _tmpV.subVectors(curr.pos, prev.pos);
         const speed = delta.length() / Math.max(0.001, curr.time - prev.time);
         if (speed < 0.3) return false;
 
@@ -795,13 +810,151 @@
     let wasPinching = false;
     function detectPinch() {
         if (!state.handTracked) return false;
-        return jp['thumb-tip'].distanceTo(jp['index-finger-tip']) < 0.025;
+        return sp['thumb-tip'].distanceTo(sp['index-finger-tip']) < 0.025;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       AUDIO — ascending chord that builds with alignment
+    ═══════════════════════════════════════════════════════════ */
+    let audioCtx = null;
+    let audioMaster = null;
+
+    const TONES = [146.83, 220.0, 293.66]; // D3, A3, D4
+    const GLIDE_TIME = 0.15;
+
+    // Track active audio voices keyed by zone name
+    const audioVoices = {};  // { zoneName: { osc, gain, active } }
+    let audioInitialized = false;
+
+    function initAudio() {
+        if (audioInitialized) return;
+        try {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            audioMaster = audioCtx.createGain();
+            audioMaster.gain.value = 0.3;
+            audioMaster.connect(audioCtx.destination);
+            audioInitialized = true;
+        } catch (e) {
+            console.warn('Audio not available:', e);
+        }
+    }
+
+    function activeAudioZones() {
+        return Object.keys(audioVoices).filter(k => audioVoices[k] && audioVoices[k].active);
+    }
+
+    function reassignAudioPitches() {
+        const active = activeAudioZones();
+        active.forEach((name, i) => {
+            const v = audioVoices[name];
+            if (v && v.osc) {
+                const targetFreq = TONES[i];
+                v.osc.frequency.cancelScheduledValues(audioCtx.currentTime);
+                v.osc.frequency.setValueAtTime(v.osc.frequency.value, audioCtx.currentTime);
+                v.osc.frequency.linearRampToValueAtTime(targetFreq, audioCtx.currentTime + GLIDE_TIME);
+            }
+        });
+    }
+
+    function startAudioVoice(zoneName) {
+        if (!audioInitialized) initAudio();
+        if (!audioCtx) return;
+        if (audioVoices[zoneName] && audioVoices[zoneName].active) return;
+
+        // Resume context if suspended (needed for user gesture requirement)
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+
+        const voiceGain = audioCtx.createGain();
+        voiceGain.gain.value = 0;
+        voiceGain.connect(audioMaster);
+
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        // Assign pitch based on current count of active voices
+        const currentCount = activeAudioZones().length;
+        osc.frequency.value = TONES[Math.min(currentCount, TONES.length - 1)];
+        osc.connect(voiceGain);
+        osc.start();
+
+        // Fade in
+        voiceGain.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.35);
+
+        audioVoices[zoneName] = { osc, gain: voiceGain, active: true };
+    }
+
+    function stopAudioVoice(zoneName, fadeTime) {
+        fadeTime = fadeTime || 0.6;
+        const v = audioVoices[zoneName];
+        if (!v || !v.active) return;
+
+        const now = audioCtx.currentTime;
+        v.gain.gain.cancelScheduledValues(now);
+        v.gain.gain.setValueAtTime(v.gain.gain.value, now);
+        v.gain.gain.linearRampToValueAtTime(0, now + fadeTime);
+
+        const osc = v.osc;
+        setTimeout(() => { try { osc.stop(); } catch(e) {} }, fadeTime * 1000 + 50);
+
+        audioVoices[zoneName] = null;
+
+        // Remaining voices shift down
+        reassignAudioPitches();
+    }
+
+    function fadeAllAudio(fadeTime) {
+        fadeTime = fadeTime || 1.0;
+        for (const name of Object.keys(audioVoices)) {
+            stopAudioVoice(name, fadeTime);
+        }
+    }
+
+    // Track previous alignment state to detect transitions
+    let prevFingerOk = false;
+    let prevPalmOk = false;
+    let prevThumbOk = false;
+
+    function updateAudio(fOk, pOk, tOk, phase) {
+        // Only play audio during active phases
+        if (phase === 'waiting') {
+            if (activeAudioZones().length > 0) fadeAllAudio(0.5);
+            prevFingerOk = false; prevPalmOk = false; prevThumbOk = false;
+            return;
+        }
+
+        // Grace period: no new sounds, fade existing
+        if (state.graceTimer > 0) {
+            if (activeAudioZones().length > 0) fadeAllAudio(0.8);
+            prevFingerOk = false; prevPalmOk = false; prevThumbOk = false;
+            return;
+        }
+
+        // Finger zone
+        if (fOk && !prevFingerOk) startAudioVoice('fingers');
+        if (!fOk && prevFingerOk && phase === 'orienting') stopAudioVoice('fingers', 0.4);
+
+        // Palm zone
+        if (pOk && !prevPalmOk) startAudioVoice('palm');
+        if (!pOk && prevPalmOk && phase === 'orienting') stopAudioVoice('palm', 0.4);
+
+        // Thumb zone (only during committing/locked)
+        if (tOk && !prevThumbOk && (phase === 'committing' || phase === 'locked'))
+            startAudioVoice('thumb');
+        if (!tOk && prevThumbOk && phase === 'committing')
+            stopAudioVoice('thumb', 0.4);
+
+        // Paused: keep chord sustaining, it will fade on next generateRound via grace
+        // Locked → paused: chord stays
+
+        prevFingerOk = fOk;
+        prevPalmOk = pOk;
+        prevThumbOk = tOk;
     }
 
     /* ═══════════════════════════════════════════════════════════
        COLOR / PULSE HELPERS
     ═══════════════════════════════════════════════════════════ */
-    function lerpC(a, b, t) { return a.clone().lerp(b, t); }
+    const _tmpCol = new THREE.Color();
+    function lerpC(a, b, t) { return _tmpCol.copy(a).lerp(b, t); }
 
     function pulseMultiplier(t, time) {
         if (t < 0.3) return 1.0;
@@ -865,8 +1018,11 @@
     }
 
     /* ═══════════════════════════════════════════════════════════
-       VISUAL UPDATES
+       VISUAL UPDATES — pre-allocated temp vectors
     ═══════════════════════════════════════════════════════════ */
+    const _boneMid = new THREE.Vector3();
+    const _boneDir = new THREE.Vector3();
+
     function updateTubeHand(ft, pt, tt, fOk, pOk, tOk, scaf, show, time) {
         if (!show) {
             for (const n in tubeJoints) tubeJoints[n].visible = false;
@@ -881,7 +1037,7 @@
 
         for (const name of JOINT_NAMES) {
             const m = tubeJoints[name];
-            m.position.copy(jp[name]); m.visible = true;
+            m.position.copy(sp[name]); m.visible = true;
             const col = getZoneColor(name, ft, pt, tt, fOk, pOk, tOk, scaf);
             const aligned = getZoneAligned(name, fOk, pOk, tOk);
             const zt = getZoneT(name, ft, pt, tt);
@@ -892,14 +1048,14 @@
         }
 
         for (const b of tubeBones) {
-            const pA = jp[b.a], pB = jp[b.b];
-            const mid = new THREE.Vector3().lerpVectors(pA, pB, 0.5);
-            const dir = new THREE.Vector3().subVectors(pB, pA);
-            const len = dir.length();
+            const pA = sp[b.a], pB = sp[b.b];
+            _boneMid.lerpVectors(pA, pB, 0.5);
+            _boneDir.subVectors(pB, pA);
+            const len = _boneDir.length();
             if (len < 0.001) { b.mesh.visible = false; continue; }
-            dir.normalize();
-            b.mesh.position.copy(mid);
-            b.mesh.quaternion.setFromUnitVectors(UP, dir);
+            _boneDir.divideScalar(len); // normalize without creating new vec
+            b.mesh.position.copy(_boneMid);
+            b.mesh.quaternion.setFromUnitVectors(UP, _boneDir);
             b.mesh.scale.set(1, len, 1);
             b.mesh.visible = true;
             const zone = getBoneZone(b.a, b.b);
@@ -914,11 +1070,10 @@
 
         for (const w of palmWebs) {
             const pos = w.mesh.geometry.attributes.position;
-            pos.setXYZ(0, jp[w.a].x, jp[w.a].y, jp[w.a].z);
-            pos.setXYZ(1, jp[w.b].x, jp[w.b].y, jp[w.b].z);
-            pos.setXYZ(2, jp[w.c].x, jp[w.c].y, jp[w.c].z);
+            pos.setXYZ(0, sp[w.a].x, sp[w.a].y, sp[w.a].z);
+            pos.setXYZ(1, sp[w.b].x, sp[w.b].y, sp[w.b].z);
+            pos.setXYZ(2, sp[w.c].x, sp[w.c].y, sp[w.c].z);
             pos.needsUpdate = true;
-            w.mesh.geometry.computeVertexNormals();
             w.mesh.visible = true;
             const col = getPalmColor(pt, pOk, scaf);
             w.mesh.material.color.copy(col);
@@ -949,13 +1104,13 @@
         FINGER_DEFS.forEach((f, i) => {
             const arrow = fingerArrows[i];
             if (showFingers) {
-                arrow.position.copy(jp[f.distal]);
+                arrow.position.copy(sp[f.distal]);
                 arrow.setDirection(hd.fingerDirs[i]);
                 arrow.setLength(0.05, 0.014, 0.008);
                 setArrowColor(arrow, fCol, fOk ? 1.0 : ft * pF);
                 arrow.visible = true;
                 if (scaf) {
-                    fingerLabels[i].position.copy(jp[f.tip]).addScaledVector(hd.fingerDirs[i], 0.045);
+                    fingerLabels[i].position.copy(sp[f.tip]).addScaledVector(hd.fingerDirs[i], 0.045);
                     fingerLabels[i].visible = true;
                 } else { fingerLabels[i].visible = false; }
             } else {
@@ -967,13 +1122,13 @@
         // Thumb arrow (visible during committing + locked + paused)
         const showThumb = phase === 'committing' || phase === 'locked' || phase === 'paused';
         if (showThumb) {
-            thumbOverlay.position.copy(jp[THUMB_DEF.distal]);
+            thumbOverlay.position.copy(sp[THUMB_DEF.distal]);
             thumbOverlay.setDirection(hd.thumbDir);
             thumbOverlay.setLength(0.055, 0.016, 0.009);
             setArrowColor(thumbOverlay, tCol, tOk ? 1.0 : tt * pT);
             thumbOverlay.visible = true;
             if (scaf) {
-                thumbLbl.position.copy(jp[THUMB_DEF.tip]).addScaledVector(hd.thumbDir, 0.045);
+                thumbLbl.position.copy(sp[THUMB_DEF.tip]).addScaledVector(hd.thumbDir, 0.045);
                 thumbLbl.visible = true;
             } else { thumbLbl.visible = false; }
         } else {
@@ -1040,6 +1195,7 @@
                 await renderer.xr.setSession(session);
                 document.getElementById('overlay').style.display = 'none';
                 state.phase = 'waiting';
+                initAudio(); // User gesture context for Web Audio
             } catch (err) { statusEl.textContent = `VR failed: ${err.message}`; }
         });
     }
@@ -1168,6 +1324,9 @@
         if (state.phase === 'locked' || state.phase === 'paused') {
             ft = 1; pt = 1; tt = 1;
         }
+
+        // Audio feedback
+        updateAudio(fOk, pOk, tOk, state.phase);
 
         updateTubeHand(ft, pt, tt, fOk, pOk, tOk, scaf, state.handTracked, elapsed);
 
