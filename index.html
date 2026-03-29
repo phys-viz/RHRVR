@@ -59,7 +59,7 @@
     const C = {
         bg: 0x0a0e1a, grid: 0x1a2236, gridCent: 0x243050,
         cyan: 0x00a8c8, amber: 0xe08820, green: 0x30b870,
-        greenBright: 0x50ff90,
+        greenBright: 0x20c060,
         dim: 0x222a38, neutral: 0x556677, joint: 0x3a6a80,
     };
     const cCyan = new THREE.Color(C.cyan);
@@ -435,27 +435,27 @@
             ctx.font = '22px Rajdhani, sans-serif';
 
             // Show check marks for aligned zones
-            ctx.fillStyle = state.fingerOk ? '#50ff90' : '#00a8c8';
+            ctx.fillStyle = state.fingerOk ? '#20c060' : '#00a8c8';
             ctx.fillText((state.fingerOk ? '\u2713 ' : '') + 'Fingers \u2192 v', 256, 270);
-            ctx.fillStyle = state.palmOk ? '#50ff90' : '#e08820';
+            ctx.fillStyle = state.palmOk ? '#20c060' : '#e08820';
             ctx.fillText((state.palmOk ? '\u2713 ' : '') + 'Palm faces \u2192 B', 256, 296);
 
             if (state.fingerOk && state.palmOk) {
                 ctx.font = '700 24px Rajdhani, sans-serif';
-                ctx.fillStyle = '#50ff90';
+                ctx.fillStyle = '#20c060';
                 ctx.fillText('\u2191 Make a fist \u2014 extend thumb!', 256, 336);
             }
         } else if (state.phase === 'committing') {
-            ctx.fillStyle = '#50ff90';
+            ctx.fillStyle = '#20c060';
             ctx.fillText('Fist detected!', 256, 240);
             ctx.font = '22px Rajdhani, sans-serif';
             ctx.fillStyle = '#c0d0e0';
             ctx.fillText('Point your thumb along F...', 256, 272);
 
-            ctx.fillStyle = state.thumbOk ? '#50ff90' : '#8899aa';
+            ctx.fillStyle = state.thumbOk ? '#20c060' : '#8899aa';
             ctx.fillText((state.thumbOk ? '\u2713 ' : '') + 'Thumb \u2192 F', 256, 302);
         } else if (state.phase === 'locked') {
-            ctx.fillStyle = '#50ff90'; ctx.font = 'bold 32px Rajdhani, sans-serif';
+            ctx.fillStyle = '#20c060'; ctx.font = 'bold 32px Rajdhani, sans-serif';
             ctx.fillText('\u2713  CORRECT!', 256, 252);
             ctx.font = '22px Rajdhani, sans-serif'; ctx.fillStyle = '#c0d0e0';
             ctx.fillText('F = v \u00d7 B', 256, 286);
@@ -837,8 +837,8 @@
         const pCol = getPalmColor(pt, pOk, scaf);
         const tCol = getThumbColor(tt, tOk, scaf);
 
-        // Finger arrows (visible during orienting)
-        const showFingers = phase === 'orienting' || phase === 'locked' || phase === 'paused';
+        // Finger arrows (only during orienting when hand is flat)
+        const showFingers = phase === 'orienting';
         FINGER_DEFS.forEach((f, i) => {
             const arrow = fingerArrows[i];
             if (showFingers) {
@@ -962,20 +962,23 @@
         if (state.phase === 'waiting' && state.handTracked) generateRound();
 
         if (state.phase === 'orienting' && hd) {
-            // Check finger and palm alignment
-            state.fingerAlign = hd.avgFinger.dot(state.currentV);
-            state.palmAlign   = hd.palmNormal.dot(state.currentB);
-            state.fingerOk = state.fingerAlign >= ALIGN_THRESHOLD;
-            state.palmOk   = state.palmAlign   >= ALIGN_THRESHOLD;
+            // Only check finger/palm alignment when hand is NOT a fist
+            if (!state.isFist) {
+                state.fingerAlign = hd.avgFinger.dot(state.currentV);
+                state.palmAlign   = hd.palmNormal.dot(state.currentB);
+                state.fingerOk = state.fingerAlign >= ALIGN_THRESHOLD;
+                state.palmOk   = state.palmAlign   >= ALIGN_THRESHOLD;
+            }
 
-            // Both aligned + fist detected → transition to committing
+            // Both were aligned + fist now detected → freeze and commit
             if (state.fingerOk && state.palmOk && state.isFist) {
+                // Freeze alignment values at their last good state
                 state.phase = 'committing';
             }
         }
 
         if (state.phase === 'committing' && hd) {
-            // Check thumb direction
+            // Only check thumb — finger/palm stay frozen
             state.thumbAlign = hd.thumbDir.dot(state.expectedF);
             state.thumbOk = state.thumbAlign >= ALIGN_THRESHOLD;
 
