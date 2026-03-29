@@ -85,6 +85,7 @@
         fingerAlign: 0, palmAlign: 0, thumbAlign: 0,
         fingerOk: false, palmOk: false, thumbOk: false,
         isFist: false, thumbExtended: false, readyToCommit: false,
+        graceTimer: 0,
         score: { correct: 0, total: 0 },
         round: 0, difficulty: 'cardinal', streak: 0,
         handTracked: false, confirmedRightIdx: -1,
@@ -385,8 +386,48 @@
     }
 
     /* ═══════════════════════════════════════════════════════════
-       HUD
+       HUD — tethered to stay in view
     ═══════════════════════════════════════════════════════════ */
+    const hudTarget = new THREE.Vector3();
+
+    function computeHudTarget() {
+        const camPos = new THREE.Vector3();
+        const camDir = new THREE.Vector3();
+        const camRight = new THREE.Vector3();
+        camera.getWorldPosition(camPos);
+        camera.getWorldDirection(camDir);
+        camDir.y = 0;
+        if (camDir.lengthSq() < 0.001) camDir.set(0, 0, -1);
+        camDir.normalize();
+        camRight.crossVectors(camDir, UP).normalize();
+        // To the left of vectors, slightly higher
+        hudTarget.copy(camPos)
+            .addScaledVector(camDir, 0.50)
+            .addScaledVector(camRight, -0.30);
+        hudTarget.y = camPos.y - 0.15;
+    }
+
+    function snapHudToTarget() {
+        hudMesh.position.copy(hudTarget);
+    }
+
+    function tetherHud(dt) {
+        const camPos = new THREE.Vector3();
+        const camDir = new THREE.Vector3();
+        camera.getWorldPosition(camPos);
+        camera.getWorldDirection(camDir);
+        const toHud = new THREE.Vector3().subVectors(hudMesh.position, camPos).normalize();
+        const angle = Math.acos(Math.max(-1, Math.min(1, camDir.dot(toHud))));
+        if (angle > TETHER_ANGLE) {
+            computeHudTarget();
+            const drift = new THREE.Vector3().subVectors(hudTarget, hudMesh.position);
+            const d = drift.length();
+            if (d > 0.001) {
+                hudMesh.position.addScaledVector(drift.normalize(), Math.min(d, TETHER_SPEED * dt));
+            }
+        }
+    }
+
     const hudCv = document.createElement('canvas');
     hudCv.width = 512; hudCv.height = 400;
     const hudCtx = hudCv.getContext('2d');
@@ -516,10 +557,14 @@
         state.round++;
         state.phase = 'orienting';
         state.fingerOk = state.palmOk = state.thumbOk = false;
+        state.fingerAlign = 0; state.palmAlign = 0; state.thumbAlign = 0;
         state.isFist = false; state.thumbExtended = false; state.readyToCommit = false;
+        state.graceTimer = 1.0; // 1 second grace period — no alignment feedback
 
         computeVectorTarget();
         snapVectorsToTarget();
+        computeHudTarget();
+        snapHudToTarget();
 
         let v, b, attempts = 0;
         if (state.difficulty === 'cardinal') {
@@ -961,7 +1006,12 @@
         /* ── PHASE LOGIC ── */
         if (state.phase === 'waiting' && state.handTracked) generateRound();
 
-        if (state.phase === 'orienting' && hd) {
+        // Grace period countdown
+        if (state.graceTimer > 0) {
+            state.graceTimer -= dt;
+        }
+
+        if (state.phase === 'orienting' && hd && state.graceTimer <= 0) {
             if (!state.readyToCommit) {
                 // Still searching: recalculate alignment (only when hand is open)
                 if (!state.isFist) {
@@ -1018,9 +1068,11 @@
         }
 
         // Tether
+        // Tether vectors and HUD
         if (state.phase === 'orienting' || state.phase === 'committing' ||
             state.phase === 'locked' || state.phase === 'paused') {
             tetherVectors(dt);
+            tetherHud(dt);
         }
 
         // Visual params
@@ -1036,9 +1088,15 @@
             tt = Math.max(0, Math.min(1, (state.thumbAlign  - 0.3) / rng));
         }
 
-        const fOk = state.fingerOk && active;
-        const pOk = state.palmOk && active;
-        const tOk = state.thumbOk && active;
+        let fOk = state.fingerOk && active;
+        let pOk = state.palmOk && active;
+        let tOk = state.thumbOk && active;
+
+        // Grace period: force neutral hand
+        if (state.graceTimer > 0) {
+            ft = 0; pt = 0; tt = 0;
+            fOk = false; pOk = false; tOk = false;
+        }
 
         // Override during committing (finger/palm frozen green) and locked/paused
         if (state.phase === 'committing') {
