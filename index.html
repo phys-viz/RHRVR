@@ -308,7 +308,11 @@
     const vArrow = makeSceneArrow(C.cyan);
     const bArrow = makeSceneArrow(C.amber);
     const fArrow = makeSceneArrow(C.green);
-    fArrow.visible = false;
+    [vArrow, bArrow, fArrow].forEach(a => {
+        a.visible = false;
+        a.line.visible = false;
+        a.cone.visible = false;
+    });
 
     const SCENE_ARROW_BASE = 0.3;
     const SCENE_ARROW_MAX  = 1.2;
@@ -332,6 +336,8 @@
     const vLbl = createVecLabel('v', '#00a8c8');
     const bLblScene = createVecLabel('B', '#e08820');
     const fLblScene = createVecLabel('F', '#30b870');
+    vLbl.visible = false;
+    bLblScene.visible = false;
     fLblScene.visible = false;
 
     function positionVecLabels() {
@@ -585,8 +591,13 @@
         state.expectedF.crossVectors(v, b).normalize();
 
         vArrow.setDirection(v); bArrow.setDirection(b);
+        [vArrow, bArrow].forEach(a => {
+            a.visible = true; a.line.visible = true; a.cone.visible = true;
+        });
+        vLbl.visible = true; bLblScene.visible = true;
         fArrow.setDirection(state.expectedF);
-        fArrow.visible = false; fLblScene.visible = false;
+        fArrow.visible = false; fArrow.line.visible = false; fArrow.cone.visible = false;
+        fLblScene.visible = false;
 
         setSceneArrowEmissive(vArrow, SCENE_ARROW_BASE);
         setSceneArrowEmissive(bArrow, SCENE_ARROW_BASE);
@@ -1055,7 +1066,8 @@
             if (state.thumbOk && state.isFist) {
                 state.phase = 'locked';
                 state.score.total++; state.score.correct++; state.streak++;
-                fArrow.visible = true; fLblScene.visible = true;
+                fArrow.visible = true; fArrow.line.visible = true; fArrow.cone.visible = true;
+                fLblScene.visible = true;
                 launchParticle(vectorOrigin.clone(), state.expectedF);
                 setTimeout(() => { if (state.phase === 'locked') state.phase = 'paused'; }, 1500);
             }
