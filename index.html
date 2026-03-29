@@ -84,7 +84,7 @@
         expectedF: new THREE.Vector3(),
         fingerAlign: 0, palmAlign: 0, thumbAlign: 0,
         fingerOk: false, palmOk: false, thumbOk: false,
-        isFist: false, thumbExtended: false,
+        isFist: false, thumbExtended: false, readyToCommit: false,
         score: { correct: 0, total: 0 },
         round: 0, difficulty: 'cardinal', streak: 0,
         handTracked: false, confirmedRightIdx: -1,
@@ -516,7 +516,7 @@
         state.round++;
         state.phase = 'orienting';
         state.fingerOk = state.palmOk = state.thumbOk = false;
-        state.isFist = false; state.thumbExtended = false;
+        state.isFist = false; state.thumbExtended = false; state.readyToCommit = false;
 
         computeVectorTarget();
         snapVectorsToTarget();
@@ -962,30 +962,43 @@
         if (state.phase === 'waiting' && state.handTracked) generateRound();
 
         if (state.phase === 'orienting' && hd) {
-            // Only check finger/palm alignment when hand is NOT a fist
-            if (!state.isFist) {
-                state.fingerAlign = hd.avgFinger.dot(state.currentV);
-                state.palmAlign   = hd.palmNormal.dot(state.currentB);
-                state.fingerOk = state.fingerAlign >= ALIGN_THRESHOLD;
-                state.palmOk   = state.palmAlign   >= ALIGN_THRESHOLD;
-            }
+            if (!state.readyToCommit) {
+                // Still searching: recalculate alignment (only when hand is open)
+                if (!state.isFist) {
+                    state.fingerAlign = hd.avgFinger.dot(state.currentV);
+                    state.palmAlign   = hd.palmNormal.dot(state.currentB);
+                    state.fingerOk = state.fingerAlign >= ALIGN_THRESHOLD;
+                    state.palmOk   = state.palmAlign   >= ALIGN_THRESHOLD;
 
-            // Both were aligned + fist now detected → freeze and commit
-            if (state.fingerOk && state.palmOk && state.isFist) {
-                // Freeze alignment values at their last good state
+                    // Latch when both zones are green
+                    if (state.fingerOk && state.palmOk) {
+                        state.readyToCommit = true;
+                    }
+                }
+            }
+            // Once latched, stop recalculating — just wait for fist
+            // readyToCommit survives the curl transition
+
+            // Ready + fist → commit
+            if (state.readyToCommit && state.isFist) {
+                state.fingerOk = true;
+                state.palmOk = true;
                 state.phase = 'committing';
             }
         }
 
         if (state.phase === 'committing' && hd) {
-            // Only check thumb — finger/palm stay frozen
+            // Only check thumb — finger/palm stay frozen green
             state.thumbAlign = hd.thumbDir.dot(state.expectedF);
             state.thumbOk = state.thumbAlign >= ALIGN_THRESHOLD;
 
-            // If they open their hand, go back to orienting
+            // If they open their hand, go back to orienting fully
             if (!state.isFist) {
                 state.phase = 'orienting';
                 state.thumbOk = false;
+                state.readyToCommit = false;  // must re-prove alignment
+                state.fingerOk = false;
+                state.palmOk = false;
             }
 
             // Thumb aligned → locked!
@@ -1027,7 +1040,10 @@
         const pOk = state.palmOk && active;
         const tOk = state.thumbOk && active;
 
-        // Override to full during locked/paused
+        // Override during committing (finger/palm frozen green) and locked/paused
+        if (state.phase === 'committing') {
+            ft = 1; pt = 1;
+        }
         if (state.phase === 'locked' || state.phase === 'paused') {
             ft = 1; pt = 1; tt = 1;
         }
