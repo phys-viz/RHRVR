@@ -8,61 +8,33 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            background: #0a0e1a;
-            color: #c0c8d8;
+            background: #0a0e1a; color: #c0c8d8;
             font-family: 'Rajdhani', sans-serif;
-            overflow: hidden;
-            width: 100vw;
-            height: 100vh;
+            overflow: hidden; width: 100vw; height: 100vh;
         }
         #overlay {
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 10;
-            pointer-events: none;
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            z-index: 10; pointer-events: none;
         }
         #title {
             font-family: 'Share Tech Mono', monospace;
-            font-size: 22px;
-            color: #00e5ff;
-            letter-spacing: 3px;
-            margin-bottom: 8px;
+            font-size: 22px; color: #00e5ff;
+            letter-spacing: 3px; margin-bottom: 8px;
         }
-        #subtitle {
-            font-size: 15px;
-            color: #607080;
-            margin-bottom: 30px;
-        }
+        #subtitle { font-size: 15px; color: #607080; margin-bottom: 30px; }
         #enter-vr {
-            pointer-events: auto;
-            padding: 14px 36px;
-            font-family: 'Rajdhani', sans-serif;
-            font-weight: 700;
-            font-size: 18px;
-            letter-spacing: 1px;
+            pointer-events: auto; padding: 14px 36px;
+            font-family: 'Rajdhani', sans-serif; font-weight: 700;
+            font-size: 18px; letter-spacing: 1px;
             background: linear-gradient(135deg, #00e5ff, #00b8d4);
-            color: #0a0e1a;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            text-transform: uppercase;
-            transition: all 0.2s;
+            color: #0a0e1a; border: none; border-radius: 4px;
+            cursor: pointer; text-transform: uppercase; transition: all 0.2s;
         }
         #enter-vr:hover { transform: scale(1.05); }
-        #enter-vr:disabled {
-            background: #2a3040; color: #556;
-            cursor: not-allowed; transform: none;
-        }
-        #status {
-            margin-top: 16px;
-            font-family: 'Share Tech Mono', monospace;
-            font-size: 13px;
-            color: #ff5252;
-        }
+        #enter-vr:disabled { background: #2a3040; color: #556; cursor: not-allowed; transform: none; }
+        #status { margin-top: 16px; font-family: 'Share Tech Mono', monospace; font-size: 13px; color: #ff5252; }
         canvas { display: block; }
     </style>
 </head>
@@ -75,71 +47,54 @@
     </div>
 
     <script type="importmap">
-    {
-        "imports": {
-            "three": "https://unpkg.com/three@0.128.0/build/three.module.js"
-        }
-    }
+    { "imports": { "three": "https://unpkg.com/three@0.128.0/build/three.module.js" } }
     </script>
 
     <script type="module">
     import * as THREE from 'three';
 
-    // ─── PALETTE ──────────────────────────────────────────────
+    /* ═══════════════════════════════════════════════════════════
+       PALETTE
+    ═══════════════════════════════════════════════════════════ */
     const C = {
-        bg:       0x0a0e1a,
-        grid:     0x1a2236,
-        gridCent: 0x243050,
-        cyan:     0x00a8c8,
-        amber:    0xe08820,
-        green:    0x30b870,
-        red:      0xff5252,
-        dim:      0x222a38,
-        neutral:  0x556677,
-        joint:    0x3a6a80,
+        bg: 0x0a0e1a, grid: 0x1a2236, gridCent: 0x243050,
+        cyan: 0x00a8c8, amber: 0xe08820, green: 0x30b870,
+        red: 0xff5252, dim: 0x222a38, neutral: 0x556677, joint: 0x3a6a80,
     };
-
-    const cCyan    = new THREE.Color(C.cyan);
-    const cAmber   = new THREE.Color(C.amber);
-    const cGreen   = new THREE.Color(C.green);
-    const cDim     = new THREE.Color(C.dim);
+    const cCyan = new THREE.Color(C.cyan);
+    const cAmber = new THREE.Color(C.amber);
+    const cGreen = new THREE.Color(C.green);
+    const cDim = new THREE.Color(C.dim);
     const cNeutral = new THREE.Color(C.neutral);
-    const cJoint   = new THREE.Color(C.joint);
-    const UP       = new THREE.Vector3(0, 1, 0);
+    const cJoint = new THREE.Color(C.joint);
+    const UP = new THREE.Vector3(0, 1, 0);
 
-    // ─── STATE ────────────────────────────────────────────────
+    /* ═══════════════════════════════════════════════════════════
+       STATE
+    ═══════════════════════════════════════════════════════════ */
     const state = {
-        mode:        'scaffolded',
-        phase:       'waiting',
-        currentV:    new THREE.Vector3(),
-        currentB:    new THREE.Vector3(),
-        expectedF:   new THREE.Vector3(),
-        fingerAlign: 0,
-        palmAlign:   0,
-        thumbAlign:  0,
-        fingerOk:    false,
-        palmOk:      false,
-        thumbOk:     false,
-        lockTimer:   0,
-        score:       { correct: 0, total: 0 },
-        round:       0,
-        difficulty:  'cardinal',
-        streak:      0,
-        handTracked: false,
+        mode: 'scaffolded', phase: 'waiting',
+        currentV: new THREE.Vector3(), currentB: new THREE.Vector3(),
+        expectedF: new THREE.Vector3(),
+        fingerAlign: 0, palmAlign: 0, thumbAlign: 0,
+        fingerOk: false, palmOk: false, thumbOk: false,
+        lockTimer: 0,
+        score: { correct: 0, total: 0 },
+        round: 0, difficulty: 'cardinal', streak: 0,
+        handTracked: false, confirmedRightIdx: -1,
     };
-
     const ALIGN_THRESHOLD = 0.75;
-    const LOCK_HOLD       = 0.6;
-    const STREAK_UNLOCK   = 4;
+    const LOCK_HOLD = 0.6;
+    const STREAK_UNLOCK = 4;
 
-    // ─── SCENE ────────────────────────────────────────────────
+    /* ═══════════════════════════════════════════════════════════
+       SCENE
+    ═══════════════════════════════════════════════════════════ */
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(C.bg);
     scene.fog = new THREE.FogExp2(C.bg, 0.08);
-
     const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 50);
     camera.position.set(0, 1.6, 0);
-
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(innerWidth, innerHeight);
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -152,14 +107,14 @@
     pt1.position.set(0, 3, 0); scene.add(pt1);
     const pt2 = new THREE.PointLight(C.amber, 0.25, 8);
     pt2.position.set(2, 2, -2); scene.add(pt2);
-
     const grid = new THREE.GridHelper(20, 40, C.gridCent, C.grid);
     grid.material.transparent = true; grid.material.opacity = 0.35;
     scene.add(grid);
 
-    // ─── HAND SETUP ───────────────────────────────────────────
-    // Register both hands with XR system but do NOT add to scene yet.
-    // We add to scene only if mesh hand model succeeds (and only right hand).
+    /* ═══════════════════════════════════════════════════════════
+       HAND SETUP — register both, render only right
+    ═══════════════════════════════════════════════════════════ */
+    // DO NOT add xrHands to scene — we draw our own tube hand
     const xrHands = [renderer.xr.getHand(0), renderer.xr.getHand(1)];
 
     const JOINT_NAMES = [
@@ -190,70 +145,70 @@
         ['pinky-finger-phalanx-proximal','pinky-finger-phalanx-intermediate'],
         ['pinky-finger-phalanx-intermediate','pinky-finger-phalanx-distal'],
         ['pinky-finger-phalanx-distal','pinky-finger-tip'],
+        // Cross-palm bones
         ['index-finger-metacarpal','middle-finger-metacarpal'],
         ['middle-finger-metacarpal','ring-finger-metacarpal'],
         ['ring-finger-metacarpal','pinky-finger-metacarpal'],
     ];
 
-    // Zone mapping for per-digit coloring
+    // Palm webbing triangles (between metacarpals and wrist)
+    const PALM_TRIS = [
+        ['wrist', 'index-finger-metacarpal', 'middle-finger-metacarpal'],
+        ['wrist', 'middle-finger-metacarpal', 'ring-finger-metacarpal'],
+        ['wrist', 'ring-finger-metacarpal', 'pinky-finger-metacarpal'],
+        ['wrist', 'thumb-metacarpal', 'index-finger-metacarpal'],
+    ];
+
     const FINGER_JOINTS = new Set([
         'index-finger-metacarpal','index-finger-phalanx-proximal','index-finger-phalanx-intermediate','index-finger-phalanx-distal','index-finger-tip',
         'middle-finger-metacarpal','middle-finger-phalanx-proximal','middle-finger-phalanx-intermediate','middle-finger-phalanx-distal','middle-finger-tip',
         'ring-finger-metacarpal','ring-finger-phalanx-proximal','ring-finger-phalanx-intermediate','ring-finger-phalanx-distal','ring-finger-tip',
         'pinky-finger-metacarpal','pinky-finger-phalanx-proximal','pinky-finger-phalanx-intermediate','pinky-finger-phalanx-distal','pinky-finger-tip',
     ]);
-    const THUMB_JOINTS = new Set([
-        'thumb-metacarpal','thumb-phalanx-proximal','thumb-phalanx-distal','thumb-tip',
-    ]);
+    const THUMB_JOINTS = new Set(['thumb-metacarpal','thumb-phalanx-proximal','thumb-phalanx-distal','thumb-tip']);
 
     const FINGER_DEFS = [
-        { distal: 'index-finger-phalanx-distal',  tip: 'index-finger-tip' },
+        { distal: 'index-finger-phalanx-distal', tip: 'index-finger-tip' },
         { distal: 'middle-finger-phalanx-distal', tip: 'middle-finger-tip' },
-        { distal: 'ring-finger-phalanx-distal',   tip: 'ring-finger-tip' },
-        { distal: 'pinky-finger-phalanx-distal',  tip: 'pinky-finger-tip' },
+        { distal: 'ring-finger-phalanx-distal', tip: 'ring-finger-tip' },
+        { distal: 'pinky-finger-phalanx-distal', tip: 'pinky-finger-tip' },
     ];
     const THUMB_DEF = { distal: 'thumb-phalanx-distal', tip: 'thumb-tip' };
 
-    // Joint position cache
     const jp = {};
-    for (const name of JOINT_NAMES) jp[name] = new THREE.Vector3();
+    for (const n of JOINT_NAMES) jp[n] = new THREE.Vector3();
 
-    // ─── HAND RENDERING: MESH vs TUBE ─────────────────────────
-    let useMeshHand = false;
-    let meshHandModels = {};       // { 0: model, 1: model }
-    let rightHandIdx = -1;         // which getHand() index is right
-
-    // Tube hand objects (used if mesh fails)
+    /* ═══════════════════════════════════════════════════════════
+       TUBE HAND — polished with palm webbing
+    ═══════════════════════════════════════════════════════════ */
     const tubeGroup = new THREE.Group();
     scene.add(tubeGroup);
 
-    // Joint sphere sizes by type
-    function jointRadius(name) {
-        if (name === 'wrist') return 0.010;
-        if (name.includes('metacarpal')) return 0.008;
-        if (name.includes('proximal')) return 0.007;
-        if (name.includes('intermediate')) return 0.006;
-        if (name.includes('distal')) return 0.006;
-        if (name.includes('tip')) return 0.005;
-        return 0.006;
+    function jr(name) {
+        if (name === 'wrist') return 0.012;
+        if (name.includes('metacarpal')) return 0.009;
+        if (name.includes('proximal')) return 0.008;
+        if (name.includes('intermediate')) return 0.007;
+        if (name.includes('distal')) return 0.0065;
+        if (name.includes('tip')) return 0.006;
+        return 0.007;
     }
 
-    // Bone tube radii
-    function boneRadius(a, b) {
-        if (a === 'wrist' || b === 'wrist') return 0.005;
+    function br(a, b) {
+        if (a === 'wrist' || b === 'wrist') return 0.006;
         if (a.includes('metacarpal') && b.includes('metacarpal')) return 0.005;
-        if (a.includes('metacarpal') || b.includes('metacarpal')) return 0.004;
-        return 0.0035;
+        if (a.includes('metacarpal') || b.includes('metacarpal')) return 0.005;
+        if (a.includes('proximal') || b.includes('proximal')) return 0.0045;
+        return 0.004;
     }
 
-    // Create tube hand geometry
+    // Joint spheres
     const tubeJoints = {};
     for (const name of JOINT_NAMES) {
-        const r = jointRadius(name);
-        const geo = new THREE.SphereGeometry(r, 10, 10);
+        const geo = new THREE.SphereGeometry(jr(name), 12, 12);
         const mat = new THREE.MeshStandardMaterial({
             color: C.joint, emissive: C.joint, emissiveIntensity: 0.2,
-            roughness: 0.45, transparent: true, opacity: 0.9,
+            roughness: 0.4, metalness: 0.1, transparent: true, opacity: 0.92,
         });
         const m = new THREE.Mesh(geo, mat);
         m.visible = false;
@@ -261,13 +216,13 @@
         tubeJoints[name] = m;
     }
 
+    // Bone cylinders
     const tubeBones = BONES.map(([a, b]) => {
-        const r = boneRadius(a, b);
-        // Unit cylinder along Y
-        const geo = new THREE.CylinderGeometry(r, r, 1, 8, 1);
+        const r = br(a, b);
+        const geo = new THREE.CylinderGeometry(r, r * 0.9, 1, 10, 1); // slight taper
         const mat = new THREE.MeshStandardMaterial({
             color: C.joint, emissive: C.joint, emissiveIntensity: 0.15,
-            roughness: 0.45, transparent: true, opacity: 0.85,
+            roughness: 0.4, metalness: 0.1, transparent: true, opacity: 0.88,
         });
         const m = new THREE.Mesh(geo, mat);
         m.visible = false;
@@ -275,61 +230,26 @@
         return { mesh: m, a, b };
     });
 
-    // Attempt mesh hand loading
-    async function tryLoadMeshHand() {
-        try {
-            const module = await import(
-                'https://unpkg.com/three@0.128.0/examples/jsm/webxr/XRHandModelFactory.js'
-            );
-            const factory = new module.XRHandModelFactory();
+    // Palm webbing (triangle meshes)
+    const palmWebs = PALM_TRIS.map(([a, b, c]) => {
+        const geo = new THREE.BufferGeometry();
+        const positions = new Float32Array(9); // 3 verts × 3 components
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        // Double-sided so it's visible from both angles
+        const mat = new THREE.MeshStandardMaterial({
+            color: C.joint, emissive: C.joint, emissiveIntensity: 0.1,
+            roughness: 0.5, transparent: true, opacity: 0.45,
+            side: THREE.DoubleSide,
+        });
+        const m = new THREE.Mesh(geo, mat);
+        m.visible = false;
+        tubeGroup.add(m);
+        return { mesh: m, a, b, c };
+    });
 
-            // Create models for both hand indices
-            for (let i = 0; i < 2; i++) {
-                const model = factory.createHandModel(xrHands[i], 'mesh');
-                model.visible = false;
-                xrHands[i].add(model);
-                scene.add(xrHands[i]);
-                meshHandModels[i] = model;
-            }
-
-            // Wait up to 6 seconds for the GLBs to actually load
-            let loaded = false;
-            const start = Date.now();
-            while (Date.now() - start < 6000) {
-                await new Promise(r => setTimeout(r, 500));
-                // Check if either model has children with geometry
-                for (let i = 0; i < 2; i++) {
-                    const m = meshHandModels[i];
-                    if (m.children.length > 0) { loaded = true; break; }
-                }
-                if (loaded) break;
-            }
-
-            if (loaded) {
-                useMeshHand = true;
-                // Hide tube hand
-                tubeGroup.visible = false;
-                console.log('Mesh hand loaded successfully');
-            } else {
-                throw new Error('GLB models did not load in time');
-            }
-        } catch (e) {
-            console.warn('Mesh hand failed, using tube hand:', e);
-            useMeshHand = false;
-            tubeGroup.visible = true;
-            // Clean up any partial mesh hand setup
-            for (let i = 0; i < 2; i++) {
-                if (meshHandModels[i]) {
-                    xrHands[i].remove(meshHandModels[i]);
-                }
-                scene.remove(xrHands[i]);
-            }
-            meshHandModels = {};
-        }
-    }
-    tryLoadMeshHand();
-
-    // ─── OVERLAY ARROWS ───────────────────────────────────────
+    /* ═══════════════════════════════════════════════════════════
+       OVERLAY ARROWS
+    ═══════════════════════════════════════════════════════════ */
     function createOverlayArrow(len, headLen, headW) {
         const arrow = new THREE.ArrowHelper(
             new THREE.Vector3(0,1,0), new THREE.Vector3(),
@@ -351,15 +271,14 @@
     const thumbOverlay = createOverlayArrow(0.055, 0.016, 0.009);
     const palmOverlay  = createOverlayArrow(0.07, 0.020, 0.012);
 
-    // Labels (offset increased to avoid overlap)
+    // Labels
     function createLabel(text, cssColor) {
         const cv = document.createElement('canvas');
         cv.width = 128; cv.height = 64;
         const ctx = cv.getContext('2d');
         ctx.font = 'bold 40px Rajdhani, sans-serif';
         ctx.fillStyle = cssColor;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(text, 64, 32);
         const tex = new THREE.CanvasTexture(cv);
         const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
@@ -371,20 +290,41 @@
     }
 
     const fingerLabels = FINGER_DEFS.map(() => createLabel('v', '#00a8c8'));
-    const thumbLbl     = createLabel('F', '#30b870');
-    const palmLbl      = createLabel('B', '#e08820');
+    const thumbLbl = createLabel('F', '#30b870');
+    const palmLbl = createLabel('B', '#e08820');
 
-    // ─── SCENE VECTORS ────────────────────────────────────────
+    /* ═══════════════════════════════════════════════════════════
+       SCENE VECTORS (v, B, F)
+    ═══════════════════════════════════════════════════════════ */
     const vectorOrigin = new THREE.Vector3(0, 1.3, -0.8);
     const ARROW_LEN = 0.35;
 
-    const vArrow = new THREE.ArrowHelper(new THREE.Vector3(1,0,0), vectorOrigin.clone(), ARROW_LEN, C.cyan, 0.06, 0.03);
-    scene.add(vArrow);
-    const bArrow = new THREE.ArrowHelper(new THREE.Vector3(0,1,0), vectorOrigin.clone(), ARROW_LEN, C.amber, 0.06, 0.03);
-    scene.add(bArrow);
-    const fArrow = new THREE.ArrowHelper(new THREE.Vector3(0,0,1), vectorOrigin.clone(), ARROW_LEN, C.green, 0.06, 0.03);
+    // Custom arrow materials so we can animate emissive
+    function makeSceneArrow(color) {
+        const arrow = new THREE.ArrowHelper(
+            new THREE.Vector3(1, 0, 0), vectorOrigin.clone(),
+            ARROW_LEN, color, 0.06, 0.03
+        );
+        // Replace with emissive materials
+        arrow.cone.material = new THREE.MeshStandardMaterial({
+            color: color, emissive: color, emissiveIntensity: 0.3,
+            roughness: 0.3, transparent: true, opacity: 0.95,
+        });
+        arrow.line.material = new THREE.LineBasicMaterial({
+            color: color, transparent: true, opacity: 0.95,
+        });
+        scene.add(arrow);
+        return arrow;
+    }
+
+    const vArrow = makeSceneArrow(C.cyan);
+    const bArrow = makeSceneArrow(C.amber);
+    const fArrow = makeSceneArrow(C.green);
     fArrow.visible = false;
-    scene.add(fArrow);
+
+    // Scene arrow base emissive intensity (we'll animate this)
+    const SCENE_ARROW_BASE_EMISSIVE = 0.3;
+    const SCENE_ARROW_MAX_EMISSIVE  = 1.2;
 
     function createVecLabel(text, cssColor) {
         const cv = document.createElement('canvas');
@@ -392,8 +332,7 @@
         const ctx = cv.getContext('2d');
         ctx.font = 'bold 44px Share Tech Mono, monospace';
         ctx.fillStyle = cssColor;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(text, 64, 32);
         const tex = new THREE.CanvasTexture(cv);
         const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
@@ -415,7 +354,9 @@
         fLblScene.position.copy(vectorOrigin).addScaledVector(state.expectedF, off);
     }
 
-    // ─── HUD ──────────────────────────────────────────────────
+    /* ═══════════════════════════════════════════════════════════
+       HUD
+    ═══════════════════════════════════════════════════════════ */
     const hudCv = document.createElement('canvas');
     hudCv.width = 512; hudCv.height = 400;
     const hudCtx = hudCv.getContext('2d');
@@ -506,21 +447,23 @@
         hudTex.needsUpdate = true;
     }
 
-    // ─── PARTICLES ────────────────────────────────────────────
+    /* ═══════════════════════════════════════════════════════════
+       PARTICLES
+    ═══════════════════════════════════════════════════════════ */
     const pGeo = new THREE.SphereGeometry(0.015, 12, 12);
     const particles = [];
-
     function launchParticle(origin, dir) {
         const mat = new THREE.MeshStandardMaterial({
             color: C.green, emissive: C.green, emissiveIntensity: 0.8, transparent: true,
         });
         const m = new THREE.Mesh(pGeo, mat);
-        m.position.copy(origin);
-        scene.add(m);
+        m.position.copy(origin); scene.add(m);
         particles.push({ mesh: m, vel: dir.clone().multiplyScalar(0.8), life: 2.0 });
     }
 
-    // ─── VECTOR GENERATION ────────────────────────────────────
+    /* ═══════════════════════════════════════════════════════════
+       VECTOR GENERATION — perpendicular, filtered for comfort
+    ═══════════════════════════════════════════════════════════ */
     const CARDINALS = [
         new THREE.Vector3(1,0,0), new THREE.Vector3(-1,0,0),
         new THREE.Vector3(0,1,0), new THREE.Vector3(0,-1,0),
@@ -533,6 +476,22 @@
         const perp = new THREE.Vector3().crossVectors(v, arb).normalize();
         perp.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(v, Math.random() * Math.PI * 2));
         return perp;
+    }
+
+    function isComfortableV(v) {
+        // Get camera gaze direction
+        const camDir = new THREE.Vector3();
+        camera.getWorldDirection(camDir);
+
+        // Reject v that points too much toward user (would need fingers toward face)
+        // camDir points FORWARD, so v pointing toward user = v · (-camDir) > threshold
+        const towardUser = -v.dot(camDir);
+        if (towardUser > 0.5) return false;
+
+        // Reject straight down (pointing fingers at floor is awkward for tracking)
+        if (v.y < -0.8) return false;
+
+        return true;
     }
 
     function repositionVectors() {
@@ -558,13 +517,19 @@
 
         repositionVectors();
 
-        let v, b;
+        let v, b, attempts = 0;
         if (state.difficulty === 'cardinal') {
-            v = CARDINALS[Math.floor(Math.random() * 6)].clone();
+            do {
+                v = CARDINALS[Math.floor(Math.random() * 6)].clone();
+                attempts++;
+            } while (!isComfortableV(v) && attempts < 30);
             const perps = CARDINALS.filter(c => Math.abs(c.dot(v)) < 0.1);
             b = perps[Math.floor(Math.random() * perps.length)].clone();
         } else {
-            v = new THREE.Vector3(Math.random()*2-1, Math.random()*2-1, Math.random()*2-1).normalize();
+            do {
+                v = new THREE.Vector3(Math.random()*2-1, Math.random()*2-1, Math.random()*2-1).normalize();
+                attempts++;
+            } while (!isComfortableV(v) && attempts < 50);
             b = randomPerp(v);
         }
 
@@ -578,28 +543,30 @@
         fArrow.visible = false;
         fLblScene.visible = false;
 
+        // Reset scene arrow emissive to base
+        setSceneArrowEmissive(vArrow, SCENE_ARROW_BASE_EMISSIVE);
+        setSceneArrowEmissive(bArrow, SCENE_ARROW_BASE_EMISSIVE);
+
         positionVecLabels();
     }
 
-    // ─── HAND READING ─────────────────────────────────────────
+    /* ═══════════════════════════════════════════════════════════
+       HAND READING — robust right-hand detection
+    ═══════════════════════════════════════════════════════════ */
     function findRightHandIdx() {
         const session = renderer.xr.getSession();
-        if (!session) return -1;
+        if (!session || !session.inputSources) return -1;
 
-        for (let i = 0; i < session.inputSources.length; i++) {
-            const src = session.inputSources[i];
-            if (src.handedness === 'right' && src.hand) {
-                // Match to our xrHands by index. inputSources order
-                // corresponds to getHand(0), getHand(1), etc.
-                // But mapping isn't guaranteed, so check which hand
-                // object has populated joints.
-                for (let h = 0; h < 2; h++) {
-                    if (xrHands[h].joints && xrHands[h].joints['wrist']) {
-                        // Verify this one matches 'right' by checking if
-                        // the inputSource index aligns
-                        // In practice on Quest, we return h if the source is right
-                        return h;
-                    }
+        // Check inputSources each frame for handedness
+        for (const src of session.inputSources) {
+            if (src.handedness !== 'right' || !src.hand) continue;
+            // Found a right hand source — now find which getHand() index has joints
+            for (let h = 0; h < 2; h++) {
+                const hand = xrHands[h];
+                if (hand.joints && hand.joints['wrist'] && hand.joints['index-finger-tip']) {
+                    // Verify this is actually the right one by checking joint count
+                    // On Quest, the hand with matching inputSource will have populated joints
+                    return h;
                 }
             }
         }
@@ -609,26 +576,37 @@
     let lastHandData = null;
 
     function readRightHand() {
-        // First try proper handedness detection
-        let hIdx = findRightHandIdx();
+        // Re-check handedness EVERY frame until confirmed
+        const detected = findRightHandIdx();
+        if (detected >= 0) {
+            state.confirmedRightIdx = detected;
+        }
 
-        // Fallback: if we previously found a right hand, keep using it
-        if (hIdx === -1 && rightHandIdx >= 0) hIdx = rightHandIdx;
-
-        // Last resort: use first hand with joints
-        if (hIdx === -1) {
-            for (let i = 0; i < 2; i++) {
-                if (xrHands[i].joints && xrHands[i].joints['wrist'] && xrHands[i].joints['index-finger-tip']) {
-                    hIdx = i;
-                    break;
+        // If we haven't found right hand yet, don't render anything
+        if (state.confirmedRightIdx < 0) {
+            // Try fallback: first hand with joints, but only if inputSources isn't populated yet
+            const session = renderer.xr.getSession();
+            const hasInputSources = session && session.inputSources && session.inputSources.length > 0;
+            if (!hasInputSources) {
+                for (let i = 0; i < 2; i++) {
+                    if (xrHands[i].joints && xrHands[i].joints['wrist']) {
+                        state.confirmedRightIdx = i;
+                        break;
+                    }
                 }
             }
         }
 
-        if (hIdx === -1) { state.handTracked = false; return null; }
+        if (state.confirmedRightIdx < 0) {
+            state.handTracked = false;
+            return null;
+        }
 
-        rightHandIdx = hIdx;
-        const rHand = xrHands[hIdx];
+        const rHand = xrHands[state.confirmedRightIdx];
+        if (!rHand.joints || !rHand.joints['wrist']) {
+            state.handTracked = false;
+            return null;
+        }
 
         let ok = true;
         for (const name of JOINT_NAMES) {
@@ -667,14 +645,12 @@
         return lastHandData;
     }
 
-    // ─── FIST SHAKE ───────────────────────────────────────────
+    /* ═══════════════════════════════════════════════════════════
+       FIST SHAKE
+    ═══════════════════════════════════════════════════════════ */
     const fistShake = {
-        isFist: false,
-        wristHistory: [],
-        reversals: 0,
-        lastDir: 0,
-        lastReversalTime: 0,
-        cooldown: 0,
+        wristHistory: [], reversals: 0, lastDir: 0,
+        lastReversalTime: 0, cooldown: 0,
     };
 
     function detectFist() {
@@ -690,9 +666,7 @@
 
     function updateFistShake(dt) {
         if (fistShake.cooldown > 0) { fistShake.cooldown -= dt; return false; }
-
-        fistShake.isFist = detectFist();
-        if (!fistShake.isFist) {
+        if (!detectFist()) {
             fistShake.wristHistory = [];
             fistShake.reversals = 0;
             fistShake.lastDir = 0;
@@ -701,7 +675,6 @@
 
         const now = performance.now() / 1000;
         fistShake.wristHistory.push({ pos: jp['wrist'].clone(), time: now });
-
         while (fistShake.wristHistory.length > 0 && now - fistShake.wristHistory[0].time > 1.5) {
             fistShake.wristHistory.shift();
         }
@@ -724,7 +697,6 @@
             fistShake.lastReversalTime = now;
         }
         fistShake.lastDir = dir;
-
         if (now - fistShake.lastReversalTime > 1.5) fistShake.reversals = 0;
 
         if (fistShake.reversals >= 3) {
@@ -736,21 +708,39 @@
         return false;
     }
 
-    // ─── PINCH ────────────────────────────────────────────────
+    /* ═══════════════════════════════════════════════════════════
+       PINCH
+    ═══════════════════════════════════════════════════════════ */
     let wasPinching = false;
     function detectPinch() {
         if (!state.handTracked) return false;
         return jp['thumb-tip'].distanceTo(jp['index-finger-tip']) < 0.025;
     }
 
-    // ─── COLOR HELPERS ────────────────────────────────────────
+    /* ═══════════════════════════════════════════════════════════
+       COLOR / PULSE HELPERS
+    ═══════════════════════════════════════════════════════════ */
     function lerpC(a, b, t) { return a.clone().lerp(b, t); }
+
+    // Pulse: returns a multiplier 0.6–1.0 that oscillates
+    // Rate increases with alignment (slow throb → fast pulse)
+    function pulseMultiplier(t, time) {
+        if (t < 0.3) return 1.0; // no pulse below 30% alignment
+        // Frequency: 1 Hz at t=0.3, up to 4 Hz at t=1.0
+        const freq = 1.0 + t * 3.0;
+        const amplitude = 0.2 + t * 0.2; // 0.2 → 0.4
+        return 1.0 - amplitude + amplitude * (0.5 + 0.5 * Math.sin(time * freq * Math.PI * 2));
+    }
 
     function setArrowColor(arrow, color, intensity) {
         arrow.cone.material.color.copy(color);
         arrow.cone.material.emissive.copy(color);
         arrow.cone.material.emissiveIntensity = 0.2 + intensity * 0.8;
         arrow.line.material.color.copy(color);
+    }
+
+    function setSceneArrowEmissive(arrow, intensity) {
+        arrow.cone.material.emissiveIntensity = intensity;
     }
 
     function getZoneColor(jointName, ft, pt, tt, scaf) {
@@ -775,29 +765,22 @@
         return 'palm';
     }
 
-    // ─── VISUAL UPDATE ───────────────────────────────────────
-    function updateMeshHandVisibility() {
-        if (!useMeshHand) return;
-        // Show only right hand mesh model
-        for (let i = 0; i < 2; i++) {
-            if (meshHandModels[i]) {
-                meshHandModels[i].visible = (i === rightHandIdx);
-            }
-            // Also hide the parent xrHand group for the wrong hand
-            xrHands[i].visible = (i === rightHandIdx);
-        }
-    }
-
-    function updateTubeHand(ft, pt, tt, scaf, showHand) {
-        if (useMeshHand) { tubeGroup.visible = false; return; }
-        tubeGroup.visible = true;
-
+    /* ═══════════════════════════════════════════════════════════
+       VISUAL UPDATE — tube hand, arrows, scene arrow response
+    ═══════════════════════════════════════════════════════════ */
+    function updateTubeHand(ft, pt, tt, scaf, showHand, time) {
         if (!showHand) {
-            for (const name in tubeJoints) tubeJoints[name].visible = false;
+            for (const n in tubeJoints) tubeJoints[n].visible = false;
             for (const b of tubeBones) b.mesh.visible = false;
+            for (const w of palmWebs) w.mesh.visible = false;
             return;
         }
 
+        const pFinger = pulseMultiplier(ft, time);
+        const pPalm   = pulseMultiplier(pt, time);
+        const pThumb  = pulseMultiplier(tt, time);
+
+        // Joints
         for (const name of JOINT_NAMES) {
             const m = tubeJoints[name];
             m.position.copy(jp[name]);
@@ -805,15 +788,16 @@
 
             const col = getZoneColor(name, ft, pt, tt, scaf);
             const zt = getZoneT(name, ft, pt, tt);
+            const pulse = FINGER_JOINTS.has(name) ? pFinger : THUMB_JOINTS.has(name) ? pThumb : pPalm;
             m.material.color.copy(col);
             m.material.emissive.copy(col);
-            m.material.emissiveIntensity = 0.15 + zt * 0.7;
+            m.material.emissiveIntensity = (0.15 + zt * 0.7) * pulse;
         }
 
+        // Bones
         for (const b of tubeBones) {
             const pA = jp[b.a], pB = jp[b.b];
             if (!pA || !pB) { b.mesh.visible = false; continue; }
-
             const mid = new THREE.Vector3().lerpVectors(pA, pB, 0.5);
             const dir = new THREE.Vector3().subVectors(pB, pA);
             const len = dir.length();
@@ -827,14 +811,34 @@
 
             const zone = getBoneZone(b.a, b.b);
             const zt = zone === 'finger' ? ft : zone === 'thumb' ? tt : pt;
+            const pulse = zone === 'finger' ? pFinger : zone === 'thumb' ? pThumb : pPalm;
             const col = getZoneColor(b.a, ft, pt, tt, scaf);
             b.mesh.material.color.copy(col);
             b.mesh.material.emissive.copy(col);
-            b.mesh.material.emissiveIntensity = 0.1 + zt * 0.6;
+            b.mesh.material.emissiveIntensity = (0.1 + zt * 0.6) * pulse;
+        }
+
+        // Palm webs
+        for (const w of palmWebs) {
+            const pA = jp[w.a], pB = jp[w.b], pC = jp[w.c];
+            if (!pA || !pB || !pC) { w.mesh.visible = false; continue; }
+
+            const pos = w.mesh.geometry.attributes.position;
+            pos.setXYZ(0, pA.x, pA.y, pA.z);
+            pos.setXYZ(1, pB.x, pB.y, pB.z);
+            pos.setXYZ(2, pC.x, pC.y, pC.z);
+            pos.needsUpdate = true;
+            w.mesh.geometry.computeVertexNormals();
+            w.mesh.visible = true;
+
+            const col = getZoneColor('wrist', ft, pt, tt, scaf);
+            w.mesh.material.color.copy(col);
+            w.mesh.material.emissive.copy(col);
+            w.mesh.material.emissiveIntensity = (0.08 + pt * 0.4) * pPalm;
         }
     }
 
-    function updateOverlayArrows(hd, ft, pt, tt, scaf, showOverlay) {
+    function updateOverlayArrows(hd, ft, pt, tt, scaf, showOverlay, time) {
         if (!showOverlay || !hd) {
             fingerArrows.forEach(a => a.visible = false);
             thumbOverlay.visible = false;
@@ -845,7 +849,10 @@
             return;
         }
 
-        // Arrow colors
+        const pFinger = pulseMultiplier(ft, time);
+        const pThumb  = pulseMultiplier(tt, time);
+        const pPalm   = pulseMultiplier(pt, time);
+
         let fCol, pCol, tCol;
         if (scaf) {
             fCol = lerpC(cDim, cCyan,  0.3 + ft * 0.7);
@@ -857,16 +864,15 @@
             tCol = lerpC(cNeutral, cGreen, tt);
         }
 
-        // Finger arrows (distal → tip)
+        // Finger arrows
         FINGER_DEFS.forEach((f, i) => {
             const arrow = fingerArrows[i];
             arrow.position.copy(jp[f.distal]);
             arrow.setDirection(hd.fingerDirs[i]);
             arrow.setLength(0.05, 0.014, 0.008);
-            setArrowColor(arrow, fCol, ft);
+            setArrowColor(arrow, fCol, ft * pFinger);
             arrow.visible = true;
 
-            // Labels: further out from tip
             const lbl = fingerLabels[i];
             if (scaf) {
                 lbl.position.copy(jp[f.tip]).addScaledVector(hd.fingerDirs[i], 0.045);
@@ -874,22 +880,22 @@
             } else { lbl.visible = false; }
         });
 
-        // Thumb arrow
+        // Thumb
         thumbOverlay.position.copy(jp[THUMB_DEF.distal]);
         thumbOverlay.setDirection(hd.thumbDir);
         thumbOverlay.setLength(0.055, 0.016, 0.009);
-        setArrowColor(thumbOverlay, tCol, tt);
+        setArrowColor(thumbOverlay, tCol, tt * pThumb);
         thumbOverlay.visible = true;
         if (scaf) {
             thumbLbl.position.copy(jp[THUMB_DEF.tip]).addScaledVector(hd.thumbDir, 0.045);
             thumbLbl.visible = true;
         } else { thumbLbl.visible = false; }
 
-        // Palm arrow
+        // Palm
         palmOverlay.position.copy(hd.palmCenter);
         palmOverlay.setDirection(hd.palmNormal);
         palmOverlay.setLength(0.07, 0.020, 0.012);
-        setArrowColor(palmOverlay, pCol, pt);
+        setArrowColor(palmOverlay, pCol, pt * pPalm);
         palmOverlay.visible = true;
         if (scaf) {
             palmLbl.position.copy(hd.palmCenter).addScaledVector(hd.palmNormal, 0.12);
@@ -897,7 +903,28 @@
         } else { palmLbl.visible = false; }
     }
 
-    // ─── VR INIT ──────────────────────────────────────────────
+    function updateSceneArrows(ft, pt, tt, time) {
+        // v arrow responds to finger alignment
+        const vPulse = pulseMultiplier(ft, time);
+        const vEmissive = SCENE_ARROW_BASE_EMISSIVE + ft * (SCENE_ARROW_MAX_EMISSIVE - SCENE_ARROW_BASE_EMISSIVE);
+        setSceneArrowEmissive(vArrow, vEmissive * vPulse);
+
+        // B arrow responds to palm alignment
+        const bPulse = pulseMultiplier(pt, time);
+        const bEmissive = SCENE_ARROW_BASE_EMISSIVE + pt * (SCENE_ARROW_MAX_EMISSIVE - SCENE_ARROW_BASE_EMISSIVE);
+        setSceneArrowEmissive(bArrow, bEmissive * bPulse);
+
+        // F arrow (when visible) responds to thumb
+        if (fArrow.visible) {
+            const fPulse = pulseMultiplier(tt, time);
+            const fEmissive = SCENE_ARROW_BASE_EMISSIVE + tt * (SCENE_ARROW_MAX_EMISSIVE - SCENE_ARROW_BASE_EMISSIVE);
+            setSceneArrowEmissive(fArrow, fEmissive * fPulse);
+        }
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       VR INIT
+    ═══════════════════════════════════════════════════════════ */
     const vrBtn = document.getElementById('enter-vr');
     const statusEl = document.getElementById('status');
 
@@ -931,14 +958,18 @@
     }
     initVR();
 
-    // ─── MAIN LOOP ────────────────────────────────────────────
+    /* ═══════════════════════════════════════════════════════════
+       MAIN LOOP
+    ═══════════════════════════════════════════════════════════ */
     const clock = new THREE.Clock();
+    let elapsed = 0;
 
     renderer.setAnimationLoop(() => {
         const dt = clock.getDelta();
+        elapsed += dt;
         const hd = readRightHand();
 
-        // Fist shake: toggle mode (any time)
+        // Fist shake
         if (updateFistShake(dt)) {
             state.mode = state.mode === 'scaffolded' ? 'prediction' : 'scaffolded';
         }
@@ -948,10 +979,7 @@
         const pinchTriggered = isPinching && !wasPinching;
         wasPinching = isPinching;
 
-        // Mesh hand visibility
-        updateMeshHandVisibility();
-
-        // ── Phase logic ──
+        // Phase logic
         if (state.phase === 'waiting' && state.handTracked) {
             generateRound();
         }
@@ -986,7 +1014,6 @@
             state.lockTimer = 0;
         }
 
-        // Paused: pinch to continue
         if (state.phase === 'paused' && pinchTriggered) {
             if (state.difficulty === 'cardinal' && state.streak >= STREAK_UNLOCK) {
                 state.difficulty = 'arbitrary';
@@ -994,7 +1021,7 @@
             generateRound();
         }
 
-        // ── Compute visual params ──
+        // Visual params
         const scaf = state.mode === 'scaffolded';
         const rng = ALIGN_THRESHOLD - 0.3;
         const showAligned = state.phase === 'orienting' || state.phase === 'locked' || state.phase === 'paused';
@@ -1005,19 +1032,24 @@
             pt = Math.max(0, Math.min(1, (state.palmAlign   - 0.3) / rng));
             tt = Math.max(0, Math.min(1, (state.thumbAlign  - 0.3) / rng));
         }
-
-        // Keep full brightness during locked/paused (they nailed it)
         if (state.phase === 'locked' || state.phase === 'paused') {
             ft = 1; pt = 1; tt = 1;
         }
 
-        // Update hand visuals
-        const showHand = state.handTracked;
-        updateTubeHand(ft, pt, tt, scaf, showHand);
+        // Update visuals
+        updateTubeHand(ft, pt, tt, scaf, state.handTracked, elapsed);
 
-        // Overlay arrows: show during orienting, locked, and paused
-        const showOverlay = showHand && (state.phase === 'orienting' || state.phase === 'locked' || state.phase === 'paused');
-        updateOverlayArrows(hd || lastHandData, ft, pt, tt, scaf, showOverlay);
+        const showOverlay = state.handTracked &&
+            (state.phase === 'orienting' || state.phase === 'locked' || state.phase === 'paused');
+        updateOverlayArrows(hd || lastHandData, ft, pt, tt, scaf, showOverlay, elapsed);
+
+        // Scene arrow response
+        if (showAligned) {
+            updateSceneArrows(ft, pt, tt, elapsed);
+        } else {
+            setSceneArrowEmissive(vArrow, SCENE_ARROW_BASE_EMISSIVE);
+            setSceneArrowEmissive(bArrow, SCENE_ARROW_BASE_EMISSIVE);
+        }
 
         // Particles
         for (let i = particles.length - 1; i >= 0; i--) {
