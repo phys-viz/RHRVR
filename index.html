@@ -1126,7 +1126,8 @@
     }
 
     function updateOverlayArrows(hd, ft, pt, tt, fOk, pOk, tOk, scaf, show, time, phase) {
-        if (!show || !hd) {
+        // No overlay arrows in prediction mode — only tube hand glow
+        if (!show || !hd || !scaf) {
             fingerArrows.forEach(a => a.visible = false);
             thumbOverlay.visible = false; palmOverlay.visible = false;
             fingerLabels.forEach(l => l.visible = false);
@@ -1273,34 +1274,30 @@
         }
 
         if (state.phase === 'orienting' && hd && state.graceTimer <= 0) {
-            // Always recalculate while hand is open
-            if (!state.isFist) {
+            // Detect if hand is clearly open by checking fingertip distance from palm
+            let avgTipDist = 0;
+            for (const f of FINGER_DEFS) {
+                avgTipDist += sp[f.tip].distanceTo(hd.palmCenter);
+            }
+            avgTipDist /= FINGER_DEFS.length;
+            const handClearlyOpen = avgTipDist > 0.10; // ~10cm = fingers extended
+
+            if (handClearlyOpen && !state.isFist) {
+                // Hand is flat and open — recalculate freely
                 state.fingerAlign = hd.avgFinger.dot(state.currentV);
                 state.palmAlign   = hd.palmNormal.dot(state.currentB);
                 state.fingerOk = state.fingerAlign >= ALIGN_THRESHOLD;
                 state.palmOk   = state.palmAlign   >= ALIGN_THRESHOLD;
-
-                // Hysteresis on readyToCommit:
-                // Goes true at normal threshold (both zones green)
-                // Only goes false if alignment drops well below threshold (0.5)
-                // This survives the intermediate curl frames
-                if (state.fingerOk && state.palmOk) {
-                    state.readyToCommit = true;
-                } else if (state.readyToCommit) {
-                    // Only unlatch if alignment drops significantly
-                    const HYSTERESIS_LOW = 0.5;
-                    if (state.fingerAlign < HYSTERESIS_LOW || state.palmAlign < HYSTERESIS_LOW) {
-                        state.readyToCommit = false;
-                    }
-                    // Keep visual green while latched
-                    if (state.readyToCommit) {
-                        state.fingerOk = true;
-                        state.palmOk = true;
-                    }
-                }
+                state.readyToCommit = state.fingerOk && state.palmOk;
             }
-            // When fist closes, we stop recalculating.
-            // readyToCommit survives the curl thanks to hysteresis.
+            // If hand is closing (not clearly open, not yet fist) OR fist:
+            // freeze state — readyToCommit and Ok flags keep their last open-hand values
+
+            // Keep visuals green while latched through curl
+            if (state.readyToCommit && !handClearlyOpen) {
+                state.fingerOk = true;
+                state.palmOk = true;
+            }
 
             // Ready + fist → commit
             if (state.readyToCommit && state.isFist) {
