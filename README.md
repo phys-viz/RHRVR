@@ -12,7 +12,7 @@ Students practice applying the right-hand rule for the cross product **F** = q**
 
 - Tube-rendered virtual hand that mirrors controller orientation
 - Velocity and magnetic field vectors displayed in 3D space
-- Two-phase interaction: snap-to-alignment, then fist to confirm
+- Multi-phase interaction: snap-to-alignment, then fist to confirm
 - Zone-based color feedback (correct / close / incorrect)
 - Multiple problem configurations
 
@@ -48,5 +48,5 @@ This simulation is designed to build spatial intuition for 3D cross products bef
 
 ## License
 
-© 2025 Anthony Danese. Licensed under **CC BY-NC-SA 4.0**.  
+© 2026 Anthony Danese. Licensed under **CC BY-NC-SA 4.0**.  
 Free for educational use. Commercial use requires explicit written permission.
