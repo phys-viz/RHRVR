@@ -6,7 +6,7 @@ Designed and developed by Anthony Danese, high school physics teacher.
 
 ## What it does
 
-Students practice applying the right-hand rule for the cross product **F** = q**v** × **B** in an immersive 3D environment. A virtual hand responds to controller orientation — students align the hand to match the velocity and magnetic field vectors, then curl into the correct force direction. Zone-based color feedback tells students whether their alignment is correct before they commit to the final fist gesture.
+Students practice applying the right-hand rule for the cross product **F** = q**v** × **B** in an immersive 3D environment. A virtual hand responds to controller orientation — students align the hand to match the velocity and magnetic field vectors, then curl into the correct force direction. Zone-based color and tone-based audio feedback tells students whether their alignment is correct before they commit to the final fist gesture.
 
 ## Features
 
@@ -20,27 +20,24 @@ Students practice applying the right-hand rule for the cross product **F** = q**
 
 | Action | Control |
 |---|---|
-| Orient hand | Rotate right controller |
-| Confirm answer | Squeeze trigger (fist gesture) |
-| Next problem | A button (right controller) |
-| Reset orientation | B button (right controller) |
-| Spin scene | Grip button + move controller |
-| Walk / strafe | Left thumbstick |
-| Snap turn | Right thumbstick left/right |
+| Orient hand | Right hand motion (no controller) |
+| Confirm answer | Make fist and straighten thumb |
+| Next problem | Index-thumb pinch |
+| Prediction Mode | Fist shake|
 
 ## How to use
 
 1. Open your Meta Quest browser and navigate to the live sim
 2. Tap **Enter VR**
 3. Read the velocity and field vectors displayed in the scene
-4. Rotate your controller to align the virtual hand
-5. Squeeze the trigger to confirm your answer and see feedback
+4. Rotate your right hand to align the virtual hand
+5. Make a fist and straighten thumb to confirm your answer and see feedback
 
 **Live sim:** https://phys-viz.github.io/RHRVR/
 
 ## Pedagogical context
 
-This simulation is designed to build spatial intuition for 3D cross products before students work with quantitative magnetic force problems. The two-phase commit mechanic encourages students to reason carefully rather than guess. It is part of a suite of VR simulations for introductory electromagnetism.
+This simulation is designed to build spatial intuition for 3D cross products before students work with quantitative magnetic force problems. The multi-phase commit mechanic encourages students to reason carefully rather than guess. It is part of a suite of VR simulations for introductory electromagnetism.
 
 ## Tech stack
 
