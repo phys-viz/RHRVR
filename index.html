@@ -84,7 +84,7 @@
         expectedF: new THREE.Vector3(),
         fingerAlign: 0, palmAlign: 0, thumbAlign: 0,
         fingerOk: false, palmOk: false, thumbOk: false,
-        isFist: false, thumbExtended: false, readyToCommit: false,
+        isFist: false, thumbExtended: false,
         graceTimer: 0,
         score: { correct: 0, total: 0 },
         round: 0, difficulty: 'cardinal', streak: 0,
@@ -647,7 +647,7 @@
         state.phase = 'orienting';
         state.fingerOk = state.palmOk = state.thumbOk = false;
         state.fingerAlign = 0; state.palmAlign = 0; state.thumbAlign = 0;
-        state.isFist = false; state.thumbExtended = false; state.readyToCommit = false;
+        state.isFist = false; state.thumbExtended = false;
         state.graceTimer = 1.0; // 1 second grace period — no alignment feedback
 
         computeVectorTarget();
@@ -725,6 +725,14 @@
     let lastHandData = null;
     const _fingerDirs = FINGER_DEFS.map(() => new THREE.Vector3());
     const _avgFinger = new THREE.Vector3();
+    const _avgFingerBase = new THREE.Vector3(); // metacarpal-based, stable through curl
+    const _fingerBaseDirs = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+    const FINGER_BASE_DEFS = [
+        { mcp: 'index-finger-metacarpal',  prox: 'index-finger-phalanx-proximal' },
+        { mcp: 'middle-finger-metacarpal', prox: 'middle-finger-phalanx-proximal' },
+        { mcp: 'ring-finger-metacarpal',   prox: 'ring-finger-phalanx-proximal' },
+        { mcp: 'pinky-finger-metacarpal',  prox: 'pinky-finger-phalanx-proximal' },
+    ];
     const _thumbDir = new THREE.Vector3();
     const _wristToMid = new THREE.Vector3();
     const _idxToPin = new THREE.Vector3();
@@ -759,6 +767,15 @@
         _fingerDirs.forEach(d => _avgFinger.add(d));
         _avgFinger.divideScalar(_fingerDirs.length).normalize();
 
+        // Metacarpal-based finger direction (stable through curl)
+        for (let i = 0; i < FINGER_BASE_DEFS.length; i++) {
+            const f = FINGER_BASE_DEFS[i];
+            _fingerBaseDirs[i].subVectors(sp[f.prox], sp[f.mcp]).normalize();
+        }
+        _avgFingerBase.set(0, 0, 0);
+        _fingerBaseDirs.forEach(d => _avgFingerBase.add(d));
+        _avgFingerBase.divideScalar(_fingerBaseDirs.length).normalize();
+
         // Thumb direction
         _thumbDir.subVectors(sp[THUMB_DEF.tip], sp[THUMB_DEF.distal]).normalize();
 
@@ -781,7 +798,7 @@
         state.isFist = fistClosed;
         state.thumbExtended = thumbExt;
 
-        lastHandData = { fingerDirs: _fingerDirs, avgFinger: _avgFinger, thumbDir: _thumbDir, palmNormal: _palmNormal, palmCenter: _palmCenter };
+        lastHandData = { fingerDirs: _fingerDirs, avgFinger: _avgFinger, avgFingerBase: _avgFingerBase, thumbDir: _thumbDir, palmNormal: _palmNormal, palmCenter: _palmCenter };
         return lastHandData;
     }
 
@@ -1274,55 +1291,38 @@
         }
 
         if (state.phase === 'orienting' && hd && state.graceTimer <= 0) {
-            // Detect if hand is clearly open by checking fingertip distance from palm
-            let avgTipDist = 0;
-            for (const f of FINGER_DEFS) {
-                avgTipDist += sp[f.tip].distanceTo(hd.palmCenter);
-            }
-            avgTipDist /= FINGER_DEFS.length;
-            const handClearlyOpen = avgTipDist > 0.10; // ~10cm = fingers extended
+            // Use metacarpal→proximal direction for finger alignment
+            // These bones don't rotate during curl — alignment is stable
+            state.fingerAlign = hd.avgFingerBase.dot(state.currentV);
+            state.palmAlign   = hd.palmNormal.dot(state.currentB);
+            state.fingerOk = state.fingerAlign >= ALIGN_THRESHOLD;
+            state.palmOk   = state.palmAlign   >= ALIGN_THRESHOLD;
 
-            if (handClearlyOpen && !state.isFist) {
-                // Hand is flat and open — recalculate freely
-                state.fingerAlign = hd.avgFinger.dot(state.currentV);
-                state.palmAlign   = hd.palmNormal.dot(state.currentB);
-                state.fingerOk = state.fingerAlign >= ALIGN_THRESHOLD;
-                state.palmOk   = state.palmAlign   >= ALIGN_THRESHOLD;
-                state.readyToCommit = state.fingerOk && state.palmOk;
-            }
-            // If hand is closing (not clearly open, not yet fist) OR fist:
-            // freeze state — readyToCommit and Ok flags keep their last open-hand values
-
-            // Keep visuals green while latched through curl
-            if (state.readyToCommit && !handClearlyOpen) {
-                state.fingerOk = true;
-                state.palmOk = true;
-            }
-
-            // Ready + fist → commit
-            if (state.readyToCommit && state.isFist) {
-                state.fingerOk = true;
-                state.palmOk = true;
+            // Both aligned + fist → commit
+            if (state.fingerOk && state.palmOk && state.isFist) {
                 state.phase = 'committing';
             }
         }
 
         if (state.phase === 'committing' && hd) {
-            // Only check thumb — finger/palm stay frozen green
+            // Keep checking finger/palm with stable base directions
+            state.fingerAlign = hd.avgFingerBase.dot(state.currentV);
+            state.palmAlign   = hd.palmNormal.dot(state.currentB);
+            state.fingerOk = state.fingerAlign >= ALIGN_THRESHOLD;
+            state.palmOk   = state.palmAlign   >= ALIGN_THRESHOLD;
+
+            // Check thumb
             state.thumbAlign = hd.thumbDir.dot(state.expectedF);
             state.thumbOk = state.thumbAlign >= ALIGN_THRESHOLD;
 
-            // If they open their hand, go back to orienting fully
-            if (!state.isFist) {
+            // If they open their hand or lose alignment, go back
+            if (!state.isFist || !state.fingerOk || !state.palmOk) {
                 state.phase = 'orienting';
                 state.thumbOk = false;
-                state.readyToCommit = false;  // must re-prove alignment
-                state.fingerOk = false;
-                state.palmOk = false;
             }
 
             // Thumb aligned → locked!
-            if (state.thumbOk && state.isFist) {
+            if (state.thumbOk && state.isFist && state.fingerOk && state.palmOk) {
                 state.phase = 'locked';
                 state.score.total++; state.score.correct++; state.streak++;
                 fArrow.visible = true;
