@@ -1280,11 +1280,27 @@
                 state.fingerOk = state.fingerAlign >= ALIGN_THRESHOLD;
                 state.palmOk   = state.palmAlign   >= ALIGN_THRESHOLD;
 
-                // Track readyToCommit live — can go true/false freely
-                state.readyToCommit = state.fingerOk && state.palmOk;
+                // Hysteresis on readyToCommit:
+                // Goes true at normal threshold (both zones green)
+                // Only goes false if alignment drops well below threshold (0.5)
+                // This survives the intermediate curl frames
+                if (state.fingerOk && state.palmOk) {
+                    state.readyToCommit = true;
+                } else if (state.readyToCommit) {
+                    // Only unlatch if alignment drops significantly
+                    const HYSTERESIS_LOW = 0.5;
+                    if (state.fingerAlign < HYSTERESIS_LOW || state.palmAlign < HYSTERESIS_LOW) {
+                        state.readyToCommit = false;
+                    }
+                    // Keep visual green while latched
+                    if (state.readyToCommit) {
+                        state.fingerOk = true;
+                        state.palmOk = true;
+                    }
+                }
             }
             // When fist closes, we stop recalculating.
-            // readyToCommit reflects the last open-hand state.
+            // readyToCommit survives the curl thanks to hysteresis.
 
             // Ready + fist → commit
             if (state.readyToCommit && state.isFist) {
