@@ -13,7 +13,7 @@ Students practice applying the right-hand rule for the cross product **F** = q**
 - Tube-rendered virtual hand that mirrors controller orientation
 - Velocity and magnetic field vectors displayed in 3D space
 - Multi-phase interaction: snap-to-alignment, then fist to confirm
-- Zone-based color feedback (correct / close / incorrect)
+- Zone-based color and tone-based audio feedback (correct / close / incorrect)
 - Multiple problem configurations
 
 ## Controls
