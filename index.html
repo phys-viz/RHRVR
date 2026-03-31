@@ -524,6 +524,7 @@
     }
 
     function tetherHud(dt) {
+        if (hudDragging) return;
         camera.getWorldPosition(_camPos);
         camera.getWorldDirection(_camDir);
         _tmpV.subVectors(hudMesh.position, _camPos).normalize();
@@ -552,6 +553,8 @@
     const SKIP_BTN = { x: 156, y: 324, w: 200, h: 42 };
     let skipHover = false;
     let skipFlash = 0;
+    let hudDragging = false;
+    const hudDragOffset = new THREE.Vector3();
 
     function drawHUD() {
         const ctx = hudCtx;
@@ -684,6 +687,7 @@
     }
 
     function generateRound() {
+        hudDragging = false;
         state.round++;
         state.phase = 'orienting';
         state.fingerOk = state.palmOk = state.thumbOk = false;
@@ -729,6 +733,7 @@
     }
 
     function skipRound() {
+        hudDragging = false;
         state.score.total++;
         state.score.skips++;
         state.streak = 0;
@@ -924,6 +929,7 @@
 
     const _hudLocalTip = new THREE.Vector3();
     const _hudWorldTip = new THREE.Vector3();
+    const _pinchWorldPoint = new THREE.Vector3();
     function getHudTouchPoint() {
         if (!state.handTracked || !sp['index-finger-tip']) return null;
         _hudWorldTip.copy(sp['index-finger-tip']);
@@ -940,12 +946,23 @@
         };
     }
 
+    function getPinchWorldPoint() {
+        if (!state.handTracked || !sp['index-finger-tip'] || !sp['thumb-tip']) return null;
+        return _pinchWorldPoint.copy(sp['index-finger-tip']).add(sp['thumb-tip']).multiplyScalar(0.5);
+    }
+
     function isSkipButtonTouched() {
         if (!(state.phase === 'orienting' || state.phase === 'committing')) return false;
         const pt = getHudTouchPoint();
         if (!pt) return false;
         return pt.x >= SKIP_BTN.x && pt.x <= SKIP_BTN.x + SKIP_BTN.w &&
                pt.y >= SKIP_BTN.y && pt.y <= SKIP_BTN.y + SKIP_BTN.h;
+    }
+
+    function isHudDraggableTouched() {
+        if (!(state.phase === 'orienting' || state.phase === 'committing' || state.phase === 'paused')) return false;
+        const pt = getHudTouchPoint();
+        return !!pt && !isSkipButtonTouched();
     }
 
     /* ═══════════════════════════════════════════════════════════
@@ -1409,6 +1426,19 @@
         const isPinching = detectPinch();
         const pinchTriggered = isPinching && !wasPinching;
         wasPinching = isPinching;
+        const canDragHud = isHudDraggableTouched();
+        const pinchPoint = getPinchWorldPoint();
+        if (pinchTriggered && canDragHud && pinchPoint && !skipHover) {
+            hudDragging = true;
+            hudDragOffset.copy(hudMesh.position).sub(pinchPoint);
+        }
+        if (hudDragging) {
+            if (isPinching && pinchPoint) {
+                hudMesh.position.copy(pinchPoint).add(hudDragOffset);
+            } else {
+                hudDragging = false;
+            }
+        }
 
         /* ── PHASE LOGIC ── */
         if (state.phase === 'waiting' && state.handTracked) generateRound();
@@ -1463,9 +1493,9 @@
             }
         }
 
-        if ((state.phase === 'orienting' || state.phase === 'committing') && skipTapped) {
+        if ((state.phase === 'orienting' || state.phase === 'committing') && skipTapped && !hudDragging) {
             skipRound();
-        } else if (state.phase === 'paused' && pinchTriggered) {
+        } else if (state.phase === 'paused' && pinchTriggered && !hudDragging) {
             if (state.difficulty === 'cardinal' && state.streak >= STREAK_UNLOCK)
                 state.difficulty = 'arbitrary';
             generateRound();
