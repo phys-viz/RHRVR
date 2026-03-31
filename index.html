@@ -86,7 +86,7 @@
         fingerOk: false, palmOk: false, thumbOk: false,
         isFist: false, thumbExtended: false,
         graceTimer: 0,
-        score: { correct: 0, total: 0 },
+        score: { correct: 0, total: 0, skips: 0 },
         round: 0, difficulty: 'cardinal', streak: 0,
         handTracked: false, confirmedRightIdx: -1,
     };
@@ -560,6 +560,9 @@
     );
     hudMesh.position.set(-0.55, 1.55, -0.60);
     scene.add(hudMesh);
+    const SKIP_BTN = { x: 156, y: 324, w: 200, h: 42 };
+    let skipHover = false;
+    let skipFlash = 0;
 
     function drawHUD() {
         const ctx = hudCtx;
@@ -585,7 +588,8 @@
         ctx.font = '700 38px Rajdhani, sans-serif'; ctx.fillStyle = '#f0f4f8';
         ctx.fillText(`${state.score.correct} / ${state.score.total}`, 256, 168);
         ctx.font = '18px Share Tech Mono, monospace'; ctx.fillStyle = '#667788';
-        ctx.fillText(state.difficulty === 'cardinal' ? 'Cardinal axes' : 'Arbitrary 3D', 256, 200);
+        ctx.fillText(state.difficulty === 'cardinal' ? 'Cardinal axes' : 'Arbitrary 3D', 256, 196);
+        ctx.fillText(`Skips ${state.score.skips}`, 256, 222);
 
         ctx.font = '600 26px Rajdhani, sans-serif';
         if (state.phase === 'waiting') {
@@ -628,6 +632,22 @@
             ctx.fillText('F = v \u00d7 B', 256, 272);
             ctx.font = '22px Rajdhani, sans-serif'; ctx.fillStyle = '#8899aa';
             ctx.fillText('Pinch to continue', 256, 312);
+        }
+
+        const showSkip = state.phase === 'orienting' || state.phase === 'committing';
+        if (showSkip) {
+            const flashT = Math.max(0, Math.min(1, skipFlash / 0.16));
+            const fill = skipHover || flashT > 0
+                ? `rgba(${40 + Math.round(60 * flashT)}, ${80 + Math.round(80 * flashT)}, ${120 + Math.round(60 * flashT)}, 0.95)`
+                : 'rgba(20, 34, 52, 0.92)';
+            ctx.fillStyle = fill;
+            ctx.beginPath(); ctx.roundRect(SKIP_BTN.x, SKIP_BTN.y, SKIP_BTN.w, SKIP_BTN.h, 10); ctx.fill();
+            ctx.strokeStyle = skipHover || flashT > 0 ? '#7fd8ff' : '#40607a';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.roundRect(SKIP_BTN.x, SKIP_BTN.y, SKIP_BTN.w, SKIP_BTN.h, 10); ctx.stroke();
+            ctx.font = '700 22px Rajdhani, sans-serif';
+            ctx.fillStyle = '#d8f4ff';
+            ctx.fillText('SKIP ROUND', 256, SKIP_BTN.y + 27);
         }
 
         ctx.font = '16px Rajdhani, sans-serif'; ctx.fillStyle = '#445566';
@@ -718,6 +738,16 @@
         setSceneArrowEmissive(vArrow, SCENE_ARROW_BASE);
         setSceneArrowEmissive(bArrow, SCENE_ARROW_BASE);
         positionVecLabels();
+    }
+
+    function skipRound() {
+        state.score.skips++;
+        state.streak = 0;
+        state.thumbOk = false;
+        state.phase = 'orienting';
+        skipFlash = 0.16;
+        playUiClick();
+        generateRound();
     }
 
     /* ═══════════════════════════════════════════════════════════
@@ -903,6 +933,32 @@
         return sp['thumb-tip'].distanceTo(sp['index-finger-tip']) < 0.025;
     }
 
+    const _hudLocalTip = new THREE.Vector3();
+    const _hudWorldTip = new THREE.Vector3();
+    function getHudTouchPoint() {
+        if (!state.handTracked || !sp['index-finger-tip']) return null;
+        _hudWorldTip.copy(sp['index-finger-tip']);
+        hudMesh.worldToLocal(_hudLocalTip.copy(_hudWorldTip));
+        if (Math.abs(_hudLocalTip.z) > 0.05) return null;
+
+        const localX = _hudLocalTip.x / 0.40;
+        const localY = _hudLocalTip.y / 0.32;
+        if (Math.abs(localX) > 0.5 || Math.abs(localY) > 0.5) return null;
+
+        return {
+            x: (localX + 0.5) * 512,
+            y: (0.5 - localY) * 400,
+        };
+    }
+
+    function isSkipButtonTouched() {
+        if (!(state.phase === 'orienting' || state.phase === 'committing')) return false;
+        const pt = getHudTouchPoint();
+        if (!pt) return false;
+        return pt.x >= SKIP_BTN.x && pt.x <= SKIP_BTN.x + SKIP_BTN.w &&
+               pt.y >= SKIP_BTN.y && pt.y <= SKIP_BTN.y + SKIP_BTN.h;
+    }
+
     /* ═══════════════════════════════════════════════════════════
        AUDIO — ascending chord that builds with alignment
     ═══════════════════════════════════════════════════════════ */
@@ -1010,6 +1066,24 @@
                 v.gain.gain.linearRampToValueAtTime(0.65, now + 0.5); // bloom from 0.5 to 0.65
             }
         }
+    }
+
+    function playUiClick() {
+        if (!audioInitialized) initAudio();
+        if (!audioCtx) return;
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(520, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(340, audioCtx.currentTime + 0.08);
+        gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.10, audioCtx.currentTime + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.10);
+        osc.connect(gain);
+        gain.connect(audioMaster);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.11);
     }
 
     // Track previous alignment state to detect transitions
@@ -1333,12 +1407,14 @@
         const dt = clock.getDelta();
         elapsed += dt;
         const hd = readRightHand();
+        if (skipFlash > 0) skipFlash = Math.max(0, skipFlash - dt);
 
         // Fist shake: mode toggle (only when NOT in committing phase to avoid conflict)
         if (state.phase !== 'committing' && updateFistShake(dt))
             state.mode = state.mode === 'scaffolded' ? 'prediction' : 'scaffolded';
 
         // Pinch
+        skipHover = isSkipButtonTouched();
         const isPinching = detectPinch();
         const pinchTriggered = isPinching && !wasPinching;
         wasPinching = isPinching;
@@ -1394,7 +1470,9 @@
             }
         }
 
-        if (state.phase === 'paused' && pinchTriggered) {
+        if ((state.phase === 'orienting' || state.phase === 'committing') && pinchTriggered && skipHover) {
+            skipRound();
+        } else if (state.phase === 'paused' && pinchTriggered) {
             if (state.difficulty === 'cardinal' && state.streak >= STREAK_UNLOCK)
                 state.difficulty = 'arbitrary';
             generateRound();
