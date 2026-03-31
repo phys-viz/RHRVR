@@ -6,7 +6,7 @@ Designed and developed by Anthony Danese, high school physics teacher.
 
 ## What it does
 
-Students practice applying the right-hand rule for the cross product **F** = q**v** × **B** in an immersive 3D environment. A virtual hand responds to controller orientation — students align the hand to match the velocity and magnetic field vectors, then curl into the correct force direction. Zone-based color and tone-based audio feedback tells students whether their alignment is correct before they commit to the final fist gesture.
+Students practice applying the right-hand rule for the cross product **F** = q**v** x **B** in an immersive 3D environment. A virtual hand responds to controller orientation - students align the hand to match the velocity and magnetic field vectors, then curl into the correct force direction. Zone-based color and tone-based audio feedback tells students whether their alignment is correct before they commit to the final fist gesture.
 
 ## Features
 
@@ -23,7 +23,7 @@ Students practice applying the right-hand rule for the cross product **F** = q**
 | Orient hand | Right hand motion (no controller) |
 | Confirm answer | Make fist and straighten thumb |
 | Next problem | Index-thumb pinch |
-| Prediction Mode | Fist shake|
+| Prediction Mode | Fist shake |
 
 ## How to use
 
@@ -43,10 +43,10 @@ This simulation is designed to build spatial intuition for 3D cross products bef
 
 - **Three.js** r128
 - WebXR API
-- Vanilla JavaScript — no build tools, no frameworks
+- Vanilla JavaScript - no build tools, no frameworks
 - Hosted on GitHub Pages
 
 ## License
 
-© 2026 Anthony Danese. Licensed under **CC BY-NC-SA 4.0**.  
+Copyright 2026 Anthony Danese. Licensed under **CC BY-NC-SA 4.0**.  
 Free for educational use. Commercial use requires explicit written permission.

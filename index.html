@@ -644,6 +644,7 @@
 
     function generateRound() {
         state.round++;
+        state.score.total++;
         state.phase = 'orienting';
         state.fingerOk = state.palmOk = state.thumbOk = false;
         state.fingerAlign = 0; state.palmAlign = 0; state.thumbAlign = 0;
@@ -697,8 +698,23 @@
     const _wristPos0 = new THREE.Vector3();
     const _wristPos1 = new THREE.Vector3();
     const _tmpV = new THREE.Vector3();
+    const _hudLookAtPos = new THREE.Vector3();
+
+    function findRightHandByHandedness() {
+        const session = renderer.xr.getSession();
+        if (!session) return -1;
+        const sources = session.inputSources;
+        for (let i = 0; i < Math.min(sources.length, xrHands.length); i++) {
+            const src = sources[i];
+            if (src?.hand && src.handedness === 'right') return i;
+        }
+        return -1;
+    }
 
     function findRightHandSpatial() {
+        const handednessIdx = findRightHandByHandedness();
+        if (handednessIdx >= 0) return handednessIdx;
+
         const wristData = []; // lightweight, just idx + reuse pre-allocated
         for (let i = 0; i < 2; i++) {
             const hand = xrHands[i];
@@ -817,14 +833,14 @@
             return false;
         }
         const now = performance.now() / 1000;
-        fistShake.wristHistory.push({ pos: sp['wrist'].clone(), time: now });
+        fistShake.wristHistory.push({ x: sp['wrist'].x, y: sp['wrist'].y, z: sp['wrist'].z, time: now });
         while (fistShake.wristHistory.length > 0 && now - fistShake.wristHistory[0].time > 1.5)
             fistShake.wristHistory.shift();
         if (fistShake.wristHistory.length < 3) return false;
 
         const prev = fistShake.wristHistory[fistShake.wristHistory.length - 2];
         const curr = fistShake.wristHistory[fistShake.wristHistory.length - 1];
-        const delta = _tmpV.subVectors(curr.pos, prev.pos);
+        const delta = _tmpV.set(curr.x - prev.x, curr.y - prev.y, curr.z - prev.z);
         const speed = delta.length() / Math.max(0.001, curr.time - prev.time);
         if (speed < 0.3) return false;
 
@@ -1236,6 +1252,7 @@
     ═══════════════════════════════════════════════════════════ */
     const vrBtn = document.getElementById('enter-vr');
     const statusEl = document.getElementById('status');
+    const overlayEl = document.getElementById('overlay');
     async function initVR() {
         if (!navigator.xr) {
             vrBtn.textContent = 'WebXR Not Available';
@@ -1252,9 +1269,21 @@
                 const session = await navigator.xr.requestSession('immersive-vr', {
                     optionalFeatures: ['hand-tracking', 'local-floor']
                 });
+                session.addEventListener('end', () => {
+                    overlayEl.style.display = 'flex';
+                    statusEl.textContent = '';
+                    vrBtn.disabled = false;
+                    vrBtn.textContent = 'ENTER VR';
+                    state.phase = 'waiting';
+                    state.handTracked = false;
+                    state.confirmedRightIdx = -1;
+                    lastHandData = null;
+                    wasPinching = false;
+                    fadeAllAudio(0.2);
+                });
                 renderer.xr.setReferenceSpaceType('local-floor');
                 await renderer.xr.setSession(session);
-                document.getElementById('overlay').style.display = 'none';
+                overlayEl.style.display = 'none';
                 state.phase = 'waiting';
                 initAudio(); // User gesture context for Web Audio
             } catch (err) { statusEl.textContent = `VR failed: ${err.message}`; }
@@ -1324,7 +1353,7 @@
             // Thumb aligned → locked!
             if (state.thumbOk && state.isFist && state.fingerOk && state.palmOk) {
                 state.phase = 'locked';
-                state.score.total++; state.score.correct++; state.streak++;
+                state.score.correct++; state.streak++;
                 fArrow.visible = true;
                 fLblScene.visible = true;
                 launchParticle(vectorOrigin.clone(), state.expectedF);
@@ -1407,9 +1436,8 @@
         }
 
         if (renderer.xr.isPresenting) {
-            const cp = new THREE.Vector3();
-            camera.getWorldPosition(cp);
-            hudMesh.lookAt(cp);
+            camera.getWorldPosition(_hudLookAtPos);
+            hudMesh.lookAt(_hudLookAtPos);
         }
 
         drawHUD();
