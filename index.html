@@ -485,13 +485,9 @@
     ═══════════════════════════════════════════════════════════ */
     const hudTarget = new THREE.Vector3();
     const hudSeparation = new THREE.Vector3();
-    const hudViewDir = new THREE.Vector3();
-    const vectorViewDir = new THREE.Vector3();
-    const HUD_VECTOR_MIN_DIST = 0.52;
+    const HUD_VECTOR_KEEP_OUT_RADIUS = ARROW_LEN + 0.24;
     const HUD_VECTOR_LATERAL_BIAS = 0.18;
     const HUD_VECTOR_VERTICAL_BIAS = 0.14;
-    const HUD_VECTOR_VIEW_DOT = 0.94;
-    const HUD_VECTOR_VIEW_PUSH = 0.16;
 
     function computeHudTarget() {
         camera.getWorldPosition(_camPos);
@@ -511,22 +507,15 @@
 
         hudSeparation.subVectors(hudTarget, vectorTarget);
         const dist = hudSeparation.length();
-        if (dist < HUD_VECTOR_MIN_DIST) {
+        if (dist < HUD_VECTOR_KEEP_OUT_RADIUS) {
             if (dist > 0.001) {
-                hudSeparation.multiplyScalar((HUD_VECTOR_MIN_DIST - dist) / dist);
+                hudSeparation.multiplyScalar((HUD_VECTOR_KEEP_OUT_RADIUS - dist) / dist);
                 hudTarget.add(hudSeparation);
             } else {
-                hudTarget.addScaledVector(_camRight, -HUD_VECTOR_MIN_DIST);
+                hudTarget.addScaledVector(_camRight, -(HUD_VECTOR_KEEP_OUT_RADIUS + HUD_VECTOR_LATERAL_BIAS));
             }
             hudTarget.addScaledVector(_camRight, -HUD_VECTOR_LATERAL_BIAS);
             hudTarget.y += HUD_VECTOR_VERTICAL_BIAS;
-        }
-
-        hudViewDir.subVectors(hudTarget, _camPos).normalize();
-        vectorViewDir.subVectors(vectorTarget, _camPos).normalize();
-        if (hudViewDir.dot(vectorViewDir) > HUD_VECTOR_VIEW_DOT) {
-            hudTarget.addScaledVector(_camRight, -HUD_VECTOR_VIEW_PUSH);
-            hudTarget.y += HUD_VECTOR_VERTICAL_BIAS * 0.5;
         }
     }
 
@@ -696,7 +685,6 @@
 
     function generateRound() {
         state.round++;
-        state.score.total++;
         state.phase = 'orienting';
         state.fingerOk = state.palmOk = state.thumbOk = false;
         state.fingerAlign = 0; state.palmAlign = 0; state.thumbAlign = 0;
@@ -741,10 +729,10 @@
     }
 
     function skipRound() {
+        state.score.total++;
         state.score.skips++;
         state.streak = 0;
         state.thumbOk = false;
-        state.phase = 'orienting';
         skipFlash = 0.16;
         playUiClick();
         generateRound();
@@ -928,6 +916,7 @@
        PINCH (for "next round" in paused phase)
     ═══════════════════════════════════════════════════════════ */
     let wasPinching = false;
+    let wasSkipTouching = false;
     function detectPinch() {
         if (!state.handTracked) return false;
         return sp['thumb-tip'].distanceTo(sp['index-finger-tip']) < 0.025;
@@ -939,7 +928,7 @@
         if (!state.handTracked || !sp['index-finger-tip']) return null;
         _hudWorldTip.copy(sp['index-finger-tip']);
         hudMesh.worldToLocal(_hudLocalTip.copy(_hudWorldTip));
-        if (Math.abs(_hudLocalTip.z) > 0.05) return null;
+        if (Math.abs(_hudLocalTip.z) > 0.025) return null;
 
         const localX = _hudLocalTip.x / 0.40;
         const localY = _hudLocalTip.y / 0.32;
@@ -1415,6 +1404,8 @@
 
         // Pinch
         skipHover = isSkipButtonTouched();
+        const skipTapped = skipHover && !wasSkipTouching;
+        wasSkipTouching = skipHover;
         const isPinching = detectPinch();
         const pinchTriggered = isPinching && !wasPinching;
         wasPinching = isPinching;
@@ -1461,7 +1452,9 @@
             // Thumb aligned → locked!
             if (state.thumbOk && state.isFist && state.fingerOk && state.palmOk) {
                 state.phase = 'locked';
-                state.score.correct++; state.streak++;
+                state.score.correct++;
+                state.score.total++;
+                state.streak++;
                 fArrow.visible = true;
                 fLblScene.visible = true;
                 launchParticle(vectorOrigin.clone(), state.expectedF);
@@ -1470,7 +1463,7 @@
             }
         }
 
-        if ((state.phase === 'orienting' || state.phase === 'committing') && pinchTriggered && skipHover) {
+        if ((state.phase === 'orienting' || state.phase === 'committing') && skipTapped) {
             skipRound();
         } else if (state.phase === 'paused' && pinchTriggered) {
             if (state.difficulty === 'cardinal' && state.streak >= STREAK_UNLOCK)
