@@ -485,9 +485,13 @@
     ═══════════════════════════════════════════════════════════ */
     const hudTarget = new THREE.Vector3();
     const hudSeparation = new THREE.Vector3();
-    const HUD_VECTOR_MIN_DIST = 0.34;
-    const HUD_VECTOR_LATERAL_BIAS = 0.10;
-    const HUD_VECTOR_VERTICAL_BIAS = 0.10;
+    const hudViewDir = new THREE.Vector3();
+    const vectorViewDir = new THREE.Vector3();
+    const HUD_VECTOR_MIN_DIST = 0.52;
+    const HUD_VECTOR_LATERAL_BIAS = 0.18;
+    const HUD_VECTOR_VERTICAL_BIAS = 0.14;
+    const HUD_VECTOR_VIEW_DOT = 0.94;
+    const HUD_VECTOR_VIEW_PUSH = 0.16;
 
     function computeHudTarget() {
         camera.getWorldPosition(_camPos);
@@ -516,6 +520,13 @@
             }
             hudTarget.addScaledVector(_camRight, -HUD_VECTOR_LATERAL_BIAS);
             hudTarget.y += HUD_VECTOR_VERTICAL_BIAS;
+        }
+
+        hudViewDir.subVectors(hudTarget, _camPos).normalize();
+        vectorViewDir.subVectors(vectorTarget, _camPos).normalize();
+        if (hudViewDir.dot(vectorViewDir) > HUD_VECTOR_VIEW_DOT) {
+            hudTarget.addScaledVector(_camRight, -HUD_VECTOR_VIEW_PUSH);
+            hudTarget.y += HUD_VECTOR_VERTICAL_BIAS * 0.5;
         }
     }
 
