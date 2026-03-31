@@ -484,6 +484,10 @@
        HUD — tethered to stay in view
     ═══════════════════════════════════════════════════════════ */
     const hudTarget = new THREE.Vector3();
+    const hudSeparation = new THREE.Vector3();
+    const HUD_VECTOR_MIN_DIST = 0.34;
+    const HUD_VECTOR_LATERAL_BIAS = 0.10;
+    const HUD_VECTOR_VERTICAL_BIAS = 0.10;
 
     function computeHudTarget() {
         camera.getWorldPosition(_camPos);
@@ -492,10 +496,27 @@
         if (_camDir.lengthSq() < 0.001) _camDir.set(0, 0, -1);
         _camDir.normalize();
         _camRight.crossVectors(_camDir, UP).normalize();
+        vectorTarget.copy(_camPos)
+            .addScaledVector(_camDir, 0.55)
+            .addScaledVector(_camRight, 0.20);
+        vectorTarget.y = _camPos.y - 0.35;
         hudTarget.copy(_camPos)
             .addScaledVector(_camDir, 0.50)
             .addScaledVector(_camRight, -0.40);
         hudTarget.y = _camPos.y - 0.15;
+
+        hudSeparation.subVectors(hudTarget, vectorTarget);
+        const dist = hudSeparation.length();
+        if (dist < HUD_VECTOR_MIN_DIST) {
+            if (dist > 0.001) {
+                hudSeparation.multiplyScalar((HUD_VECTOR_MIN_DIST - dist) / dist);
+                hudTarget.add(hudSeparation);
+            } else {
+                hudTarget.addScaledVector(_camRight, -HUD_VECTOR_MIN_DIST);
+            }
+            hudTarget.addScaledVector(_camRight, -HUD_VECTOR_LATERAL_BIAS);
+            hudTarget.y += HUD_VECTOR_VERTICAL_BIAS;
+        }
     }
 
     function snapHudToTarget() {
