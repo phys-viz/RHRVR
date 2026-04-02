@@ -480,8 +480,8 @@
         const tex = new THREE.CanvasTexture(cv);
         const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
         const sp = new THREE.Sprite(mat);
-        sp.scale.set(0.06, 0.06, 1);
-        sp.position.set(0, 0, 0.03);
+        sp.scale.set(0.04, 0.04, 1);
+        sp.position.set(0, 0, 0);
         return sp;
     }
 
@@ -493,8 +493,8 @@
             roughness: 0.25, metalness: 0.1, transparent: true, opacity: 0.95
         })
     );
-    const chargePlus = createChargeLabel('+', '#7fd8ff');
-    const chargeMinus = createChargeLabel('-', '#ff9f7a');
+    const chargePlus = createChargeLabel('+', '#f8fbff');
+    const chargeMinus = createChargeLabel('-', '#f8fbff');
     chargeMarker.add(chargeSphere);
     chargeMarker.add(chargePlus);
     chargeMarker.add(chargeMinus);
@@ -507,8 +507,8 @@
         const positive = state.currentChargeSign >= 0;
         chargePlus.visible = positive;
         chargeMinus.visible = !positive;
-        chargeSphere.material.color.setHex(positive ? 0x17314a : 0x4a241d);
-        chargeSphere.material.emissive.setHex(positive ? 0x14385c : 0x5c2214);
+        chargeSphere.material.color.setHex(positive ? 0xa92f2f : 0x1f5fb2);
+        chargeSphere.material.emissive.setHex(positive ? 0x6e1e1e : 0x163d75);
     }
 
     function computeVectorTarget() {
@@ -617,7 +617,9 @@
     hudMesh.position.set(-0.55, 1.55, -0.60);
     scene.add(hudMesh);
     const SKIP_BTN = { x: 156, y: 324, w: 200, h: 42 };
+    const CHARGE_MODE_BTN = { x: 316, y: 106, w: 140, h: 34 };
     let skipHover = false;
+    let chargeModeHover = false;
     let skipFlash = 0;
     let hudDragging = false;
     let hudAnchoredInXR = false;
@@ -644,6 +646,15 @@
 
         ctx.font = '22px Share Tech Mono, monospace'; ctx.fillStyle = '#8899aa';
         ctx.fillText(`Round ${state.round}`, 256, 126);
+        const modeFill = chargeModeHover ? 'rgba(42, 92, 126, 0.98)' : 'rgba(19, 32, 48, 0.94)';
+        ctx.fillStyle = modeFill;
+        ctx.beginPath(); ctx.roundRect(CHARGE_MODE_BTN.x, CHARGE_MODE_BTN.y, CHARGE_MODE_BTN.w, CHARGE_MODE_BTN.h, 10); ctx.fill();
+        ctx.strokeStyle = chargeModeHover ? '#a8ecff' : '#40607a';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.roundRect(CHARGE_MODE_BTN.x, CHARGE_MODE_BTN.y, CHARGE_MODE_BTN.w, CHARGE_MODE_BTN.h, 10); ctx.stroke();
+        ctx.font = '700 15px Rajdhani, sans-serif';
+        ctx.fillStyle = '#d8f4ff';
+        ctx.fillText(state.chargeMode === 'mixed' ? 'MODE: MIXED' : 'MODE: POS ONLY', CHARGE_MODE_BTN.x + CHARGE_MODE_BTN.w / 2, 128);
         ctx.font = '700 38px Rajdhani, sans-serif'; ctx.fillStyle = '#f0f4f8';
         ctx.fillText(`${state.score.correct} / ${state.score.total}`, 256, 168);
         ctx.font = '18px Share Tech Mono, monospace'; ctx.fillStyle = '#667788';
@@ -814,6 +825,19 @@
         state.thumbOk = false;
         skipFlash = 0.16;
         playUiClick();
+        generateRound();
+    }
+
+    function toggleChargeMode() {
+        state.chargeMode = state.chargeMode === 'mixed' ? 'positive' : 'mixed';
+        syncChargeModeButtons();
+        if (state.phase === 'waiting') {
+            state.currentChargeSign = 1;
+            updateChargeMarker();
+            return;
+        }
+        hudDragging = false;
+        state.thumbOk = false;
         generateRound();
     }
 
@@ -1138,10 +1162,17 @@
                pt.y >= SKIP_BTN.y && pt.y <= SKIP_BTN.y + SKIP_BTN.h;
     }
 
+    function isChargeModeButtonTouched() {
+        const pt = getHudTouchPoint();
+        if (!pt) return false;
+        return pt.x >= CHARGE_MODE_BTN.x && pt.x <= CHARGE_MODE_BTN.x + CHARGE_MODE_BTN.w &&
+               pt.y >= CHARGE_MODE_BTN.y && pt.y <= CHARGE_MODE_BTN.y + CHARGE_MODE_BTN.h;
+    }
+
     function isHudDraggableTouched() {
         if (!(state.phase === 'orienting' || state.phase === 'committing' || state.phase === 'paused')) return false;
         const pt = getHudTouchPoint();
-        return !!pt && !isSkipButtonTouched();
+        return !!pt && !isSkipButtonTouched() && !isChargeModeButtonTouched();
     }
 
     /* ═══════════════════════════════════════════════════════════
@@ -1624,6 +1655,7 @@
 
         // Pinch
         skipHover = isSkipButtonTouched();
+        chargeModeHover = isChargeModeButtonTouched();
         const skipTapped = skipHover && !wasSkipTouching;
         wasSkipTouching = skipHover;
         const isPinching = detectPinch();
@@ -1642,6 +1674,7 @@
                 hudDragging = false;
             }
         }
+        if (pinchTriggered && chargeModeHover && !skipHover) toggleChargeMode();
 
         /* ── PHASE LOGIC ── */
         if (state.phase === 'waiting' && state.handTracked) generateRound();
