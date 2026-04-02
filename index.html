@@ -818,6 +818,7 @@
     const _palmCenter = new THREE.Vector3();
     const _fingerBlend = new THREE.Vector3();
     const _thumbFromPalm = new THREE.Vector3();
+    const _handForceAxis = new THREE.Vector3();
 
     function blendedAlignment(primaryVec, secondaryVec, targetVec, primaryWeight = 0.7) {
         const secondaryWeight = 1 - primaryWeight;
@@ -894,6 +895,9 @@
         _thumbFromPalm.subVectors(sp[THUMB_DEF.tip], _palmCenter);
         if (_thumbFromPalm.lengthSq() > 1e-6) _thumbFromPalm.normalize();
         else _thumbFromPalm.copy(_thumbBlend);
+        _handForceAxis.crossVectors(_avgFingerBase, _palmNormalBlend);
+        if (_handForceAxis.lengthSq() > 1e-6) _handForceAxis.normalize();
+        else _handForceAxis.copy(_thumbBlend);
 
         // Fist detection: fingertips close to palm center
         let fistClosed = true;
@@ -915,6 +919,7 @@
             thumbDir: _thumbDir,
             thumbBlend: _thumbBlend,
             thumbFromPalm: _thumbFromPalm,
+            handForceAxis: _handForceAxis,
             palmNormal: _palmNormal,
             palmNormalAlt: _palmNormalAlt,
             palmNormalBlend: _palmNormalBlend,
@@ -1527,10 +1532,16 @@
             state.fingerOk = passesAlignment(state.fingerAlign, state.fingerOk);
             state.palmOk = passesAlignment(state.palmAlign, state.palmOk);
 
-            // Check thumb using both axis direction and thumb-tip placement from the fist.
+            // Check thumb using axis direction, thumb-tip placement, and the hand's own local force axis.
             const thumbDirectional = blendedAlignment(hd.thumbDir, hd.thumbBlend, state.expectedF, 0.7);
             const thumbPlacement = hd.thumbFromPalm.dot(state.expectedF);
-            state.thumbAlign = Math.max(thumbDirectional, thumbPlacement);
+            let handFrameForce = hd.handForceAxis.dot(state.expectedF);
+            if (handFrameForce < 0) handFrameForce *= -1;
+            const thumbHandFrame = Math.max(
+                hd.thumbFromPalm.dot(hd.handForceAxis),
+                hd.thumbBlend.dot(hd.handForceAxis)
+            ) * handFrameForce;
+            state.thumbAlign = Math.max(thumbDirectional, thumbPlacement, thumbHandFrame);
             state.thumbOk = passesAlignment(state.thumbAlign, state.thumbOk);
 
             // If they open their hand or lose alignment, go back
