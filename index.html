@@ -93,6 +93,8 @@
     const ALIGN_THRESHOLD = 0.75;
     const ALIGN_RELEASE_THRESHOLD = 0.68;
     const STREAK_UNLOCK = 4;
+    const HAND_SWITCH_CONFIRM_FRAMES = 4;
+    const HAND_MISS_GRACE_FRAMES = 12;
 
     /* ═══════════════════════════════════════════════════════════
        SCENE
@@ -524,20 +526,14 @@
         hudMesh.position.copy(hudTarget);
     }
 
+    function anchorHudInFrontOfUser() {
+        computeHudTarget();
+        snapHudToTarget();
+        hudAnchoredInXR = true;
+    }
+
     function tetherHud(dt) {
-        if (hudDragging) return;
-        camera.getWorldPosition(_camPos);
-        camera.getWorldDirection(_camDir);
-        _tmpV.subVectors(hudMesh.position, _camPos).normalize();
-        const angle = Math.acos(Math.max(-1, Math.min(1, _camDir.dot(_tmpV))));
-        if (angle > TETHER_ANGLE) {
-            computeHudTarget();
-            _tmpV.subVectors(hudTarget, hudMesh.position);
-            const d = _tmpV.length();
-            if (d > 0.001) {
-                hudMesh.position.addScaledVector(_tmpV.normalize(), Math.min(d, TETHER_SPEED * dt));
-            }
-        }
+        if (!hudAnchoredInXR) anchorHudInFrontOfUser();
     }
 
     const hudCv = document.createElement('canvas');
@@ -555,6 +551,7 @@
     let skipHover = false;
     let skipFlash = 0;
     let hudDragging = false;
+    let hudAnchoredInXR = false;
     const hudDragOffset = new THREE.Vector3();
 
     function drawHUD() {
@@ -698,8 +695,6 @@
 
         computeVectorTarget();
         snapVectorsToTarget();
-        computeHudTarget();
-        snapHudToTarget();
 
         let v, b, attempts = 0;
         if (state.difficulty === 'cardinal') {
@@ -755,6 +750,9 @@
     const _wristPos1 = new THREE.Vector3();
     const _tmpV = new THREE.Vector3();
     const _hudLookAtPos = new THREE.Vector3();
+    let pendingRightIdx = -1;
+    let pendingRightFrames = 0;
+    let handMissFrames = 0;
 
     function findRightHandByHandedness() {
         const session = renderer.xr.getSession();
@@ -792,6 +790,41 @@
         const d0 = _tmpV.subVectors(wristData[0].pos, _camPos).dot(_camRight);
         const d1 = _tmpV.subVectors(wristData[1].pos, _camPos).dot(_camRight);
         return d0 > d1 ? wristData[0].idx : wristData[1].idx;
+    }
+
+    function resetHandDetectionState() {
+        state.confirmedRightIdx = -1;
+        pendingRightIdx = -1;
+        pendingRightFrames = 0;
+        handMissFrames = 0;
+    }
+
+    function promoteDetectedHand(detected) {
+        handMissFrames = 0;
+        if (state.confirmedRightIdx === detected) {
+            pendingRightIdx = detected;
+            pendingRightFrames = HAND_SWITCH_CONFIRM_FRAMES;
+            return detected;
+        }
+        if (pendingRightIdx === detected) pendingRightFrames++;
+        else {
+            pendingRightIdx = detected;
+            pendingRightFrames = 1;
+        }
+        if (state.confirmedRightIdx < 0 || pendingRightFrames >= HAND_SWITCH_CONFIRM_FRAMES) {
+            state.confirmedRightIdx = detected;
+        }
+        return state.confirmedRightIdx;
+    }
+
+    function noteHandMiss() {
+        handMissFrames++;
+        if (handMissFrames > HAND_MISS_GRACE_FRAMES) {
+            resetHandDetectionState();
+            state.handTracked = false;
+            return null;
+        }
+        return lastHandData;
     }
 
     let lastHandData = null;
@@ -835,18 +868,31 @@
 
     function readRightHand() {
         const detected = findRightHandSpatial();
-        if (detected >= 0) state.confirmedRightIdx = detected;
-        if (state.confirmedRightIdx < 0) { state.handTracked = false; return null; }
+        if (detected >= 0) promoteDetectedHand(detected);
+        if (state.confirmedRightIdx < 0) {
+            const fallback = noteHandMiss();
+            state.handTracked = !!fallback;
+            return fallback;
+        }
 
         const rHand = xrHands[state.confirmedRightIdx];
-        if (!rHand.joints || !rHand.joints['wrist']) { state.handTracked = false; return null; }
+        if (!rHand.joints || !rHand.joints['wrist']) {
+            const fallback = noteHandMiss();
+            state.handTracked = !!fallback;
+            return fallback;
+        }
 
         let ok = true;
         for (const name of JOINT_NAMES) {
             if (rHand.joints[name]) rHand.joints[name].getWorldPosition(jp[name]);
             else ok = false;
         }
-        if (!ok) { state.handTracked = false; return null; }
+        if (!ok) {
+            const fallback = noteHandMiss();
+            state.handTracked = !!fallback;
+            return fallback;
+        }
+        handMissFrames = 0;
         state.handTracked = true;
 
         // Smooth joint positions to reduce tracking jitter
@@ -1443,7 +1489,8 @@
                     vrBtn.textContent = 'ENTER VR';
                     state.phase = 'waiting';
                     state.handTracked = false;
-                    state.confirmedRightIdx = -1;
+                    resetHandDetectionState();
+                    hudAnchoredInXR = false;
                     lastHandData = null;
                     wasPinching = false;
                     fadeAllAudio(0.2);
@@ -1452,6 +1499,9 @@
                 await renderer.xr.setSession(session);
                 overlayEl.style.display = 'none';
                 state.phase = 'waiting';
+                resetHandDetectionState();
+                hudAnchoredInXR = false;
+                anchorHudInFrontOfUser();
                 initAudio(); // User gesture context for Web Audio
             } catch (err) { statusEl.textContent = `VR failed: ${err.message}`; }
         });
