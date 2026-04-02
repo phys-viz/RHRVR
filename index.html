@@ -617,8 +617,10 @@
     hudMesh.position.set(-0.55, 1.55, -0.60);
     scene.add(hudMesh);
     const SKIP_BTN = { x: 156, y: 324, w: 200, h: 42 };
+    const HELP_MODE_BTN = { x: 56, y: 106, w: 140, h: 34 };
     const CHARGE_MODE_BTN = { x: 316, y: 106, w: 140, h: 34 };
     let skipHover = false;
+    let helpModeHover = false;
     let chargeModeHover = false;
     let skipFlash = 0;
     let hudDragging = false;
@@ -637,17 +639,21 @@
         ctx.textAlign = 'center'; ctx.fillStyle = '#ffffff';
         ctx.fillText('RIGHT HAND RULE', 256, 44);
 
-        ctx.font = '600 24px Share Tech Mono, monospace';
-        ctx.fillStyle = state.mode === 'scaffolded' ? '#e08820' : '#30b870';
-        ctx.fillText(state.mode === 'scaffolded' ? '[ SCAFFOLDED ]' : '[ PREDICTION ]', 256, 78);
-
         ctx.strokeStyle = '#2a4060'; ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(40, 94); ctx.lineTo(472, 94); ctx.stroke();
 
-        ctx.font = '22px Share Tech Mono, monospace'; ctx.fillStyle = '#8899aa';
-        ctx.fillText(`Round ${state.round}`, 256, 126);
-        const modeFill = chargeModeHover ? 'rgba(42, 92, 126, 0.98)' : 'rgba(19, 32, 48, 0.94)';
-        ctx.fillStyle = modeFill;
+        const helpFill = helpModeHover ? 'rgba(96, 86, 32, 0.98)' : 'rgba(28, 24, 16, 0.94)';
+        ctx.fillStyle = helpFill;
+        ctx.beginPath(); ctx.roundRect(HELP_MODE_BTN.x, HELP_MODE_BTN.y, HELP_MODE_BTN.w, HELP_MODE_BTN.h, 10); ctx.fill();
+        ctx.strokeStyle = helpModeHover ? '#ffe39c' : '#70624a';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.roundRect(HELP_MODE_BTN.x, HELP_MODE_BTN.y, HELP_MODE_BTN.w, HELP_MODE_BTN.h, 10); ctx.stroke();
+        ctx.font = '700 15px Rajdhani, sans-serif';
+        ctx.fillStyle = '#fff3d2';
+        ctx.fillText(state.mode === 'scaffolded' ? 'HELP: ON' : 'HELP: OFF', HELP_MODE_BTN.x + HELP_MODE_BTN.w / 2, 128);
+
+        const chargeFill = chargeModeHover ? 'rgba(42, 92, 126, 0.98)' : 'rgba(19, 32, 48, 0.94)';
+        ctx.fillStyle = chargeFill;
         ctx.beginPath(); ctx.roundRect(CHARGE_MODE_BTN.x, CHARGE_MODE_BTN.y, CHARGE_MODE_BTN.w, CHARGE_MODE_BTN.h, 10); ctx.fill();
         ctx.strokeStyle = chargeModeHover ? '#a8ecff' : '#40607a';
         ctx.lineWidth = 2;
@@ -656,21 +662,13 @@
         ctx.fillStyle = '#d8f4ff';
         ctx.fillText(state.chargeMode === 'mixed' ? 'MODE: MIXED' : 'MODE: POS ONLY', CHARGE_MODE_BTN.x + CHARGE_MODE_BTN.w / 2, 128);
         ctx.font = '700 38px Rajdhani, sans-serif'; ctx.fillStyle = '#f0f4f8';
-        ctx.fillText(`${state.score.correct} / ${state.score.total}`, 256, 168);
-        ctx.font = '18px Share Tech Mono, monospace'; ctx.fillStyle = '#667788';
-        ctx.fillText(state.difficulty === 'cardinal' ? 'Cardinal axes' : 'Arbitrary 3D', 256, 196);
-        const chargeModeLabel = state.chargeMode === 'mixed' ? 'Mixed charges' : 'Positive only';
-        const chargeLabel = state.phase === 'waiting' && state.chargeMode === 'mixed'
-            ? 'q = +/-'
-            : (state.currentChargeSign >= 0 ? 'q = +' : 'q = -');
-        ctx.fillText(`${chargeModeLabel}  |  ${chargeLabel}`, 256, 222);
-        ctx.fillText(`Skips ${state.score.skips}`, 256, 246);
+        ctx.fillText(`${state.score.correct} / ${state.score.total}`, 256, 180);
 
         ctx.font = '600 26px Rajdhani, sans-serif';
         if (state.phase === 'waiting') {
             ctx.fillStyle = '#8899aa';
-            ctx.fillText('Show your right hand to begin', 256, 276);
-        } else if (state.phase === 'orienting') {
+            ctx.fillText('Show your right hand to begin', 256, 250);
+        } else if (state.mode === 'scaffolded' && state.phase === 'orienting') {
             ctx.fillStyle = '#c0d0e0';
             ctx.fillText(state.currentChargeSign >= 0 ? 'Orient your flat hand:' : 'Orient for the negative charge force:', 256, 240);
             ctx.font = '22px Rajdhani, sans-serif';
@@ -686,7 +684,7 @@
                 ctx.fillStyle = '#20c060';
                 ctx.fillText('\u2191 Make a fist \u2014 extend thumb!', 256, 336);
             }
-        } else if (state.phase === 'committing') {
+        } else if (state.mode === 'scaffolded' && state.phase === 'committing') {
             ctx.fillStyle = '#20c060';
             ctx.fillText('Fist detected!', 256, 240);
             ctx.font = '22px Rajdhani, sans-serif';
@@ -725,8 +723,6 @@
             ctx.fillText('SKIP ROUND', 256, SKIP_BTN.y + 27);
         }
 
-        ctx.font = '16px Rajdhani, sans-serif'; ctx.fillStyle = '#445566';
-        ctx.fillText('Shake fist \u2192 toggle mode', 256, 384);
         hudTex.needsUpdate = true;
     }
 
@@ -839,6 +835,12 @@
         hudDragging = false;
         state.thumbOk = false;
         generateRound();
+    }
+
+    function toggleHelpMode() {
+        state.mode = state.mode === 'scaffolded' ? 'prediction' : 'scaffolded';
+        if (state.phase === 'waiting') return;
+        hudDragging = false;
     }
 
     /* ═══════════════════════════════════════════════════════════
@@ -1077,50 +1079,6 @@
     }
 
     /* ═══════════════════════════════════════════════════════════
-       FIST SHAKE (mode toggle — separate from commit fist)
-    ═══════════════════════════════════════════════════════════ */
-    const fistShake = {
-        wristHistory: [], reversals: 0, lastDir: 0,
-        lastReversalTime: 0, cooldown: 0,
-    };
-
-    function updateFistShake(dt) {
-        if (fistShake.cooldown > 0) { fistShake.cooldown -= dt; return false; }
-        if (!state.isFist) {
-            fistShake.wristHistory = []; fistShake.reversals = 0; fistShake.lastDir = 0;
-            return false;
-        }
-        const now = performance.now() / 1000;
-        fistShake.wristHistory.push({ x: sp['wrist'].x, y: sp['wrist'].y, z: sp['wrist'].z, time: now });
-        while (fistShake.wristHistory.length > 0 && now - fistShake.wristHistory[0].time > 1.5)
-            fistShake.wristHistory.shift();
-        if (fistShake.wristHistory.length < 3) return false;
-
-        const prev = fistShake.wristHistory[fistShake.wristHistory.length - 2];
-        const curr = fistShake.wristHistory[fistShake.wristHistory.length - 1];
-        const delta = _tmpV.set(curr.x - prev.x, curr.y - prev.y, curr.z - prev.z);
-        const speed = delta.length() / Math.max(0.001, curr.time - prev.time);
-        if (speed < 0.3) return false;
-
-        const ax = Math.abs(delta.x), ay = Math.abs(delta.y), az = Math.abs(delta.z);
-        let dir = 0;
-        if (ax >= ay && ax >= az) dir = Math.sign(delta.x);
-        else if (ay >= ax && ay >= az) dir = Math.sign(delta.y);
-        else dir = Math.sign(delta.z);
-
-        if (fistShake.lastDir !== 0 && dir !== fistShake.lastDir) {
-            fistShake.reversals++; fistShake.lastReversalTime = now;
-        }
-        fistShake.lastDir = dir;
-        if (now - fistShake.lastReversalTime > 1.5) fistShake.reversals = 0;
-        if (fistShake.reversals >= 3) {
-            fistShake.reversals = 0; fistShake.wristHistory = [];
-            fistShake.cooldown = 1.5; return true;
-        }
-        return false;
-    }
-
-    /* ═══════════════════════════════════════════════════════════
        PINCH (for "next round" in paused phase)
     ═══════════════════════════════════════════════════════════ */
     let wasPinching = false;
@@ -1169,10 +1127,17 @@
                pt.y >= CHARGE_MODE_BTN.y && pt.y <= CHARGE_MODE_BTN.y + CHARGE_MODE_BTN.h;
     }
 
+    function isHelpModeButtonTouched() {
+        const pt = getHudTouchPoint();
+        if (!pt) return false;
+        return pt.x >= HELP_MODE_BTN.x && pt.x <= HELP_MODE_BTN.x + HELP_MODE_BTN.w &&
+               pt.y >= HELP_MODE_BTN.y && pt.y <= HELP_MODE_BTN.y + HELP_MODE_BTN.h;
+    }
+
     function isHudDraggableTouched() {
         if (!(state.phase === 'orienting' || state.phase === 'committing' || state.phase === 'paused')) return false;
         const pt = getHudTouchPoint();
-        return !!pt && !isSkipButtonTouched() && !isChargeModeButtonTouched();
+        return !!pt && !isSkipButtonTouched() && !isChargeModeButtonTouched() && !isHelpModeButtonTouched();
     }
 
     /* ═══════════════════════════════════════════════════════════
@@ -1649,12 +1614,9 @@
         const hd = readRightHand();
         if (skipFlash > 0) skipFlash = Math.max(0, skipFlash - dt);
 
-        // Fist shake: mode toggle (only when NOT in committing phase to avoid conflict)
-        if (state.phase !== 'committing' && updateFistShake(dt))
-            state.mode = state.mode === 'scaffolded' ? 'prediction' : 'scaffolded';
-
         // Pinch
         skipHover = isSkipButtonTouched();
+        helpModeHover = isHelpModeButtonTouched();
         chargeModeHover = isChargeModeButtonTouched();
         const skipTapped = skipHover && !wasSkipTouching;
         wasSkipTouching = skipHover;
@@ -1674,6 +1636,7 @@
                 hudDragging = false;
             }
         }
+        if (pinchTriggered && helpModeHover && !skipHover && !chargeModeHover) toggleHelpMode();
         if (pinchTriggered && chargeModeHover && !skipHover) toggleChargeMode();
 
         /* ── PHASE LOGIC ── */
