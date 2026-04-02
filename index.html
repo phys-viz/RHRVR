@@ -650,7 +650,7 @@
         ctx.beginPath(); ctx.roundRect(HELP_MODE_BTN.x, HELP_MODE_BTN.y, HELP_MODE_BTN.w, HELP_MODE_BTN.h, 10); ctx.stroke();
         ctx.font = '700 15px Rajdhani, sans-serif';
         ctx.fillStyle = '#fff3d2';
-        ctx.fillText(state.mode === 'scaffolded' ? 'HELP: ON' : 'HELP: OFF', HELP_MODE_BTN.x + HELP_MODE_BTN.w / 2, 128);
+        ctx.fillText(state.mode === 'scaffolded' ? 'SCAFFOLDED' : 'PREDICTION', HELP_MODE_BTN.x + HELP_MODE_BTN.w / 2, 128);
 
         const chargeFill = chargeModeHover ? 'rgba(42, 92, 126, 0.98)' : 'rgba(19, 32, 48, 0.94)';
         ctx.fillStyle = chargeFill;
@@ -660,7 +660,7 @@
         ctx.beginPath(); ctx.roundRect(CHARGE_MODE_BTN.x, CHARGE_MODE_BTN.y, CHARGE_MODE_BTN.w, CHARGE_MODE_BTN.h, 10); ctx.stroke();
         ctx.font = '700 15px Rajdhani, sans-serif';
         ctx.fillStyle = '#d8f4ff';
-        ctx.fillText(state.chargeMode === 'mixed' ? 'MODE: MIXED' : 'MODE: POS ONLY', CHARGE_MODE_BTN.x + CHARGE_MODE_BTN.w / 2, 128);
+        ctx.fillText(state.chargeMode === 'mixed' ? 'MIXED' : 'POSITIVE ONLY', CHARGE_MODE_BTN.x + CHARGE_MODE_BTN.w / 2, 128);
         ctx.font = '700 38px Rajdhani, sans-serif'; ctx.fillStyle = '#f0f4f8';
         ctx.fillText(`${state.score.correct} / ${state.score.total}`, 256, 180);
 
@@ -1094,8 +1094,9 @@
     const _hudWorldPinch = new THREE.Vector3();
     const _pinchWorldPoint = new THREE.Vector3();
     function projectHudPoint(worldPoint, localPoint) {
+        hudMesh.updateWorldMatrix(true, false);
         hudMesh.worldToLocal(localPoint.copy(worldPoint));
-        if (Math.abs(localPoint.z) > 0.045) return null;
+        if (Math.abs(localPoint.z) > 0.10) return null;
         const localX = localPoint.x / 0.40;
         const localY = localPoint.y / 0.32;
         if (Math.abs(localX) > 0.5 || Math.abs(localY) > 0.5) return null;
@@ -1633,8 +1634,13 @@
         const pinchTriggered = isPinching && !wasPinching;
         wasPinching = isPinching;
         const canDragHud = isHudDraggableTouched();
+        const hudButtonActive = helpModeHover || chargeModeHover || skipHover;
         const pinchPoint = getPinchWorldPoint();
-        if (pinchTriggered && canDragHud && pinchPoint && !skipHover) {
+        if (pinchTriggered && helpModeHover && !chargeModeHover && !skipHover) {
+            toggleHelpMode();
+        } else if (pinchTriggered && chargeModeHover && !skipHover) {
+            toggleChargeMode();
+        } else if (pinchTriggered && canDragHud && pinchPoint && !hudButtonActive) {
             hudDragging = true;
             hudDragOffset.copy(hudMesh.position).sub(pinchPoint);
         }
@@ -1645,8 +1651,6 @@
                 hudDragging = false;
             }
         }
-        if (pinchTriggered && helpModeHover && !skipHover && !chargeModeHover) toggleHelpMode();
-        if (pinchTriggered && chargeModeHover && !skipHover) toggleChargeMode();
 
         /* ── PHASE LOGIC ── */
         if (state.phase === 'waiting' && state.handTracked) generateRound();
