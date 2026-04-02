@@ -1083,6 +1083,9 @@
     ═══════════════════════════════════════════════════════════ */
     let wasPinching = false;
     let wasSkipTouching = false;
+    let wasHelpModeTouching = false;
+    let wasChargeModeTouching = false;
+    let hudButtonCooldown = 0;
     function detectPinch() {
         if (!state.handTracked) return false;
         return sp['thumb-tip'].distanceTo(sp['index-finger-tip']) < 0.025;
@@ -1124,21 +1127,21 @@
 
     function isSkipButtonTouched() {
         if (!(state.phase === 'orienting' || state.phase === 'committing')) return false;
-        const pt = getHudTouchPoint(true);
+        const pt = getHudTouchPoint();
         if (!pt) return false;
         return pt.x >= SKIP_BTN.x && pt.x <= SKIP_BTN.x + SKIP_BTN.w &&
                pt.y >= SKIP_BTN.y && pt.y <= SKIP_BTN.y + SKIP_BTN.h;
     }
 
     function isChargeModeButtonTouched() {
-        const pt = getHudTouchPoint(true);
+        const pt = getHudTouchPoint();
         if (!pt) return false;
         return pt.x >= CHARGE_MODE_BTN.x && pt.x <= CHARGE_MODE_BTN.x + CHARGE_MODE_BTN.w &&
                pt.y >= CHARGE_MODE_BTN.y && pt.y <= CHARGE_MODE_BTN.y + CHARGE_MODE_BTN.h;
     }
 
     function isHelpModeButtonTouched() {
-        const pt = getHudTouchPoint(true);
+        const pt = getHudTouchPoint();
         if (!pt) return false;
         return pt.x >= HELP_MODE_BTN.x && pt.x <= HELP_MODE_BTN.x + HELP_MODE_BTN.w &&
                pt.y >= HELP_MODE_BTN.y && pt.y <= HELP_MODE_BTN.y + HELP_MODE_BTN.h;
@@ -1596,6 +1599,10 @@
                     updateChargeMarker();
                     lastHandData = null;
                     wasPinching = false;
+                    wasSkipTouching = false;
+                    wasHelpModeTouching = false;
+                    wasChargeModeTouching = false;
+                    hudButtonCooldown = 0;
                     fadeAllAudio(0.2);
                 });
                 renderer.xr.setReferenceSpaceType('local-floor');
@@ -1604,6 +1611,10 @@
                 state.phase = 'waiting';
                 resetHandDetectionState();
                 hudAnchoredInXR = false;
+                wasSkipTouching = false;
+                wasHelpModeTouching = false;
+                wasChargeModeTouching = false;
+                hudButtonCooldown = 0;
                 updateChargeMarker();
                 anchorHudInFrontOfUser();
                 initAudio(); // User gesture context for Web Audio
@@ -1623,23 +1634,30 @@
         elapsed += dt;
         const hd = readRightHand();
         if (skipFlash > 0) skipFlash = Math.max(0, skipFlash - dt);
+        if (hudButtonCooldown > 0) hudButtonCooldown = Math.max(0, hudButtonCooldown - dt);
 
         // Pinch
         skipHover = isSkipButtonTouched();
         helpModeHover = isHelpModeButtonTouched();
         chargeModeHover = isChargeModeButtonTouched();
         const skipTapped = skipHover && !wasSkipTouching;
+        const helpModeTapped = helpModeHover && !wasHelpModeTouching;
+        const chargeModeTapped = chargeModeHover && !wasChargeModeTouching;
         wasSkipTouching = skipHover;
+        wasHelpModeTouching = helpModeHover;
+        wasChargeModeTouching = chargeModeHover;
         const isPinching = detectPinch();
         const pinchTriggered = isPinching && !wasPinching;
         wasPinching = isPinching;
         const canDragHud = isHudDraggableTouched();
         const hudButtonActive = helpModeHover || chargeModeHover || skipHover;
         const pinchPoint = getPinchWorldPoint();
-        if (pinchTriggered && helpModeHover && !chargeModeHover && !skipHover) {
+        if (helpModeTapped && hudButtonCooldown === 0 && !hudDragging && !chargeModeHover && !skipHover) {
             toggleHelpMode();
-        } else if (pinchTriggered && chargeModeHover && !skipHover) {
+            hudButtonCooldown = 0.2;
+        } else if (chargeModeTapped && hudButtonCooldown === 0 && !hudDragging && !skipHover) {
             toggleChargeMode();
+            hudButtonCooldown = 0.2;
         } else if (pinchTriggered && canDragHud && pinchPoint && !hudButtonActive) {
             hudDragging = true;
             hudDragOffset.copy(hudMesh.position).sub(pinchPoint);
