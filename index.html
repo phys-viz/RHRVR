@@ -91,6 +91,7 @@
         handTracked: false, confirmedRightIdx: -1,
     };
     const ALIGN_THRESHOLD = 0.75;
+    const ALIGN_RELEASE_THRESHOLD = 0.68;
     const STREAK_UNLOCK = 4;
 
     /* ═══════════════════════════════════════════════════════════
@@ -805,10 +806,30 @@
         { mcp: 'pinky-finger-metacarpal',  prox: 'pinky-finger-phalanx-proximal' },
     ];
     const _thumbDir = new THREE.Vector3();
+    const _thumbBlend = new THREE.Vector3();
     const _wristToMid = new THREE.Vector3();
+    const _wristToThumb = new THREE.Vector3();
+    const _wristToIndex = new THREE.Vector3();
+    const _wristToPinky = new THREE.Vector3();
     const _idxToPin = new THREE.Vector3();
     const _palmNormal = new THREE.Vector3();
+    const _palmNormalAlt = new THREE.Vector3();
+    const _palmNormalBlend = new THREE.Vector3();
     const _palmCenter = new THREE.Vector3();
+    const _fingerBlend = new THREE.Vector3();
+
+    function blendedAlignment(primaryVec, secondaryVec, targetVec, primaryWeight = 0.7) {
+        const secondaryWeight = 1 - primaryWeight;
+        _tmpV.copy(primaryVec).multiplyScalar(primaryWeight)
+            .addScaledVector(secondaryVec, secondaryWeight);
+        if (_tmpV.lengthSq() > 1e-6) _tmpV.normalize();
+        else _tmpV.copy(primaryVec);
+        return Math.max(primaryVec.dot(targetVec), _tmpV.dot(targetVec));
+    }
+
+    function passesAlignment(score, wasAligned, enterThreshold = ALIGN_THRESHOLD) {
+        return score >= (wasAligned ? ALIGN_RELEASE_THRESHOLD : enterThreshold);
+    }
 
     function readRightHand() {
         const detected = findRightHandSpatial();
@@ -846,14 +867,27 @@
         _avgFingerBase.set(0, 0, 0);
         _fingerBaseDirs.forEach(d => _avgFingerBase.add(d));
         _avgFingerBase.divideScalar(_fingerBaseDirs.length).normalize();
+        _fingerBlend.copy(_avgFingerBase).multiplyScalar(0.72).addScaledVector(_avgFinger, 0.28);
+        if (_fingerBlend.lengthSq() > 1e-6) _fingerBlend.normalize();
+        else _fingerBlend.copy(_avgFingerBase);
 
         // Thumb direction
         _thumbDir.subVectors(sp[THUMB_DEF.tip], sp[THUMB_DEF.distal]).normalize();
+        _wristToThumb.subVectors(sp[THUMB_DEF.tip], sp['wrist']).normalize();
+        _thumbBlend.copy(_thumbDir).multiplyScalar(0.65).addScaledVector(_wristToThumb, 0.35);
+        if (_thumbBlend.lengthSq() > 1e-6) _thumbBlend.normalize();
+        else _thumbBlend.copy(_thumbDir);
 
         // Palm normal
         _wristToMid.subVectors(sp['middle-finger-metacarpal'], sp['wrist']).normalize();
+        _wristToIndex.subVectors(sp['index-finger-metacarpal'], sp['wrist']).normalize();
+        _wristToPinky.subVectors(sp['pinky-finger-metacarpal'], sp['wrist']).normalize();
         _idxToPin.subVectors(sp['pinky-finger-metacarpal'], sp['index-finger-metacarpal']).normalize();
         _palmNormal.crossVectors(_wristToMid, _idxToPin).normalize();
+        _palmNormalAlt.crossVectors(_wristToPinky, _wristToIndex).normalize();
+        _palmNormalBlend.copy(_palmNormal).add(_palmNormalAlt);
+        if (_palmNormalBlend.lengthSq() > 1e-6) _palmNormalBlend.normalize();
+        else _palmNormalBlend.copy(_palmNormal);
 
         _palmCenter.addVectors(sp['wrist'], sp['middle-finger-metacarpal']).multiplyScalar(0.5);
 
@@ -869,7 +903,18 @@
         state.isFist = fistClosed;
         state.thumbExtended = thumbExt;
 
-        lastHandData = { fingerDirs: _fingerDirs, avgFinger: _avgFinger, avgFingerBase: _avgFingerBase, thumbDir: _thumbDir, palmNormal: _palmNormal, palmCenter: _palmCenter };
+        lastHandData = {
+            fingerDirs: _fingerDirs,
+            avgFinger: _avgFinger,
+            avgFingerBase: _avgFingerBase,
+            fingerBlend: _fingerBlend,
+            thumbDir: _thumbDir,
+            thumbBlend: _thumbBlend,
+            palmNormal: _palmNormal,
+            palmNormalAlt: _palmNormalAlt,
+            palmNormalBlend: _palmNormalBlend,
+            palmCenter: _palmCenter
+        };
         return lastHandData;
     }
 
@@ -1451,10 +1496,14 @@
         if (state.phase === 'orienting' && hd && state.graceTimer <= 0) {
             // Use metacarpal→proximal direction for finger alignment
             // These bones don't rotate during curl — alignment is stable
-            state.fingerAlign = hd.avgFingerBase.dot(state.currentV);
-            state.palmAlign   = hd.palmNormal.dot(state.currentB);
-            state.fingerOk = state.fingerAlign >= ALIGN_THRESHOLD;
-            state.palmOk   = state.palmAlign   >= ALIGN_THRESHOLD;
+            state.fingerAlign = blendedAlignment(hd.avgFingerBase, hd.fingerBlend, state.currentV, 0.75);
+            state.palmAlign = Math.max(
+                hd.palmNormal.dot(state.currentB),
+                hd.palmNormalAlt.dot(state.currentB),
+                hd.palmNormalBlend.dot(state.currentB)
+            );
+            state.fingerOk = passesAlignment(state.fingerAlign, state.fingerOk);
+            state.palmOk = passesAlignment(state.palmAlign, state.palmOk);
 
             // Both aligned + fist → commit
             if (state.fingerOk && state.palmOk && state.isFist) {
@@ -1464,14 +1513,18 @@
 
         if (state.phase === 'committing' && hd) {
             // Keep checking finger/palm with stable base directions
-            state.fingerAlign = hd.avgFingerBase.dot(state.currentV);
-            state.palmAlign   = hd.palmNormal.dot(state.currentB);
-            state.fingerOk = state.fingerAlign >= ALIGN_THRESHOLD;
-            state.palmOk   = state.palmAlign   >= ALIGN_THRESHOLD;
+            state.fingerAlign = blendedAlignment(hd.avgFingerBase, hd.fingerBlend, state.currentV, 0.75);
+            state.palmAlign = Math.max(
+                hd.palmNormal.dot(state.currentB),
+                hd.palmNormalAlt.dot(state.currentB),
+                hd.palmNormalBlend.dot(state.currentB)
+            );
+            state.fingerOk = passesAlignment(state.fingerAlign, state.fingerOk);
+            state.palmOk = passesAlignment(state.palmAlign, state.palmOk);
 
             // Check thumb
-            state.thumbAlign = hd.thumbDir.dot(state.expectedF);
-            state.thumbOk = state.thumbAlign >= ALIGN_THRESHOLD;
+            state.thumbAlign = blendedAlignment(hd.thumbDir, hd.thumbBlend, state.expectedF, 0.7);
+            state.thumbOk = passesAlignment(state.thumbAlign, state.thumbOk);
 
             // If they open their hand or lose alignment, go back
             if (!state.isFist || !state.fingerOk || !state.palmOk) {
