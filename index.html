@@ -617,8 +617,8 @@
     hudMesh.position.set(-0.55, 1.55, -0.60);
     scene.add(hudMesh);
     const SKIP_BTN = { x: 156, y: 324, w: 200, h: 42 };
-    const HELP_MODE_BTN = { x: 56, y: 106, w: 140, h: 34 };
-    const CHARGE_MODE_BTN = { x: 316, y: 106, w: 140, h: 34 };
+    const HELP_MODE_BTN = { x: 44, y: 100, w: 156, h: 42 };
+    const CHARGE_MODE_BTN = { x: 312, y: 100, w: 156, h: 42 };
     let skipHover = false;
     let helpModeHover = false;
     let chargeModeHover = false;
@@ -1090,21 +1090,30 @@
 
     const _hudLocalTip = new THREE.Vector3();
     const _hudWorldTip = new THREE.Vector3();
+    const _hudLocalPinch = new THREE.Vector3();
+    const _hudWorldPinch = new THREE.Vector3();
     const _pinchWorldPoint = new THREE.Vector3();
-    function getHudTouchPoint() {
-        if (!state.handTracked || !sp['index-finger-tip']) return null;
-        _hudWorldTip.copy(sp['index-finger-tip']);
-        hudMesh.worldToLocal(_hudLocalTip.copy(_hudWorldTip));
-        if (Math.abs(_hudLocalTip.z) > 0.025) return null;
-
-        const localX = _hudLocalTip.x / 0.40;
-        const localY = _hudLocalTip.y / 0.32;
+    function projectHudPoint(worldPoint, localPoint) {
+        hudMesh.worldToLocal(localPoint.copy(worldPoint));
+        if (Math.abs(localPoint.z) > 0.045) return null;
+        const localX = localPoint.x / 0.40;
+        const localY = localPoint.y / 0.32;
         if (Math.abs(localX) > 0.5 || Math.abs(localY) > 0.5) return null;
-
         return {
             x: (localX + 0.5) * 512,
             y: (0.5 - localY) * 400,
         };
+    }
+
+    function getHudTouchPoint(preferPinch = false) {
+        if (!state.handTracked || !sp['index-finger-tip']) return null;
+        if (preferPinch && sp['thumb-tip']) {
+            _hudWorldPinch.copy(sp['index-finger-tip']).add(sp['thumb-tip']).multiplyScalar(0.5);
+            const pinchPt = projectHudPoint(_hudWorldPinch, _hudLocalPinch);
+            if (pinchPt) return pinchPt;
+        }
+        _hudWorldTip.copy(sp['index-finger-tip']);
+        return projectHudPoint(_hudWorldTip, _hudLocalTip);
     }
 
     function getPinchWorldPoint() {
@@ -1114,21 +1123,21 @@
 
     function isSkipButtonTouched() {
         if (!(state.phase === 'orienting' || state.phase === 'committing')) return false;
-        const pt = getHudTouchPoint();
+        const pt = getHudTouchPoint(true);
         if (!pt) return false;
         return pt.x >= SKIP_BTN.x && pt.x <= SKIP_BTN.x + SKIP_BTN.w &&
                pt.y >= SKIP_BTN.y && pt.y <= SKIP_BTN.y + SKIP_BTN.h;
     }
 
     function isChargeModeButtonTouched() {
-        const pt = getHudTouchPoint();
+        const pt = getHudTouchPoint(true);
         if (!pt) return false;
         return pt.x >= CHARGE_MODE_BTN.x && pt.x <= CHARGE_MODE_BTN.x + CHARGE_MODE_BTN.w &&
                pt.y >= CHARGE_MODE_BTN.y && pt.y <= CHARGE_MODE_BTN.y + CHARGE_MODE_BTN.h;
     }
 
     function isHelpModeButtonTouched() {
-        const pt = getHudTouchPoint();
+        const pt = getHudTouchPoint(true);
         if (!pt) return false;
         return pt.x >= HELP_MODE_BTN.x && pt.x <= HELP_MODE_BTN.x + HELP_MODE_BTN.w &&
                pt.y >= HELP_MODE_BTN.y && pt.y <= HELP_MODE_BTN.y + HELP_MODE_BTN.h;
