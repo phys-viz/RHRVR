@@ -24,6 +24,23 @@
             letter-spacing: 3px; margin-bottom: 8px;
         }
         #subtitle { font-size: 15px; color: #607080; margin-bottom: 30px; }
+        #charge-mode {
+            display: flex; gap: 10px; margin-bottom: 18px;
+            pointer-events: auto;
+        }
+        .mode-btn {
+            padding: 10px 18px;
+            font-family: 'Rajdhani', sans-serif; font-weight: 700;
+            font-size: 15px; letter-spacing: 0.8px; text-transform: uppercase;
+            color: #9fb8d6; background: rgba(18, 28, 44, 0.92);
+            border: 1px solid #28435f; border-radius: 999px; cursor: pointer;
+            transition: transform 0.2s, border-color 0.2s, color 0.2s, background 0.2s;
+        }
+        .mode-btn.active {
+            color: #06111c; background: linear-gradient(135deg, #7fd8ff, #2fd0a1);
+            border-color: #9ef0ff;
+        }
+        .mode-btn:hover { transform: translateY(-1px); }
         #enter-vr {
             pointer-events: auto; padding: 14px 36px;
             font-family: 'Rajdhani', sans-serif; font-weight: 700;
@@ -42,6 +59,10 @@
     <div id="overlay">
         <div id="title">RIGHT HAND RULE VR</div>
         <div id="subtitle">Learn the cross product with your actual hand</div>
+        <div id="charge-mode">
+            <button class="mode-btn active" data-charge-mode="positive">Positive Only</button>
+            <button class="mode-btn" data-charge-mode="mixed">Mixed Charges</button>
+        </div>
         <button id="enter-vr" disabled>Checking VR...</button>
         <div id="status"></div>
     </div>
@@ -76,11 +97,14 @@
     ═══════════════════════════════════════════════════════════ */
     const state = {
         mode: 'scaffolded',
+        chargeMode: 'positive',
+        currentChargeSign: 1,
         phase: 'waiting',
         // Phases: waiting → orienting → committing → locked → paused
         // orienting: flat hand, check fingers + palm
         // committing: fingers+palm aligned, make fist, check thumb
         currentV: new THREE.Vector3(), currentB: new THREE.Vector3(),
+        handRuleF: new THREE.Vector3(),
         expectedF: new THREE.Vector3(),
         fingerAlign: 0, palmAlign: 0, thumbAlign: 0,
         fingerOk: false, palmOk: false, thumbOk: false,
@@ -442,6 +466,49 @@
         vLbl.position.copy(vectorOrigin).addScaledVector(state.currentV, off);
         bLblScene.position.copy(vectorOrigin).addScaledVector(state.currentB, off);
         fLblScene.position.copy(vectorOrigin).addScaledVector(state.expectedF, off);
+        chargeMarker.position.copy(vectorOrigin);
+    }
+
+    function createChargeLabel(text, cssColor) {
+        const cv = document.createElement('canvas');
+        cv.width = 128; cv.height = 128;
+        const ctx = cv.getContext('2d');
+        ctx.font = '700 78px Rajdhani, sans-serif';
+        ctx.fillStyle = cssColor;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(text, 64, 64);
+        const tex = new THREE.CanvasTexture(cv);
+        const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+        const sp = new THREE.Sprite(mat);
+        sp.scale.set(0.06, 0.06, 1);
+        sp.position.set(0, 0, 0.03);
+        return sp;
+    }
+
+    const chargeMarker = new THREE.Group();
+    const chargeSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.03, 20, 20),
+        new THREE.MeshStandardMaterial({
+            color: 0x1c2740, emissive: 0x16243b, emissiveIntensity: 0.45,
+            roughness: 0.25, metalness: 0.1, transparent: true, opacity: 0.95
+        })
+    );
+    const chargePlus = createChargeLabel('+', '#7fd8ff');
+    const chargeMinus = createChargeLabel('-', '#ff9f7a');
+    chargeMarker.add(chargeSphere);
+    chargeMarker.add(chargePlus);
+    chargeMarker.add(chargeMinus);
+    chargeMarker.visible = false;
+    scene.add(chargeMarker);
+
+    function updateChargeMarker() {
+        chargeMarker.position.copy(vectorOrigin);
+        chargeMarker.visible = state.phase !== 'waiting';
+        const positive = state.currentChargeSign >= 0;
+        chargePlus.visible = positive;
+        chargeMinus.visible = !positive;
+        chargeSphere.material.color.setHex(positive ? 0x17314a : 0x4a241d);
+        chargeSphere.material.emissive.setHex(positive ? 0x14385c : 0x5c2214);
     }
 
     function computeVectorTarget() {
@@ -462,6 +529,7 @@
         vArrow.position.copy(vectorOrigin);
         bArrow.position.copy(vectorOrigin);
         fArrow.position.copy(vectorOrigin);
+        updateChargeMarker();
     }
 
     function tetherVectors(dt) {
@@ -479,6 +547,7 @@
                 bArrow.position.copy(vectorOrigin);
                 fArrow.position.copy(vectorOrigin);
                 positionVecLabels();
+                updateChargeMarker();
             }
         }
     }
@@ -579,15 +648,20 @@
         ctx.fillText(`${state.score.correct} / ${state.score.total}`, 256, 168);
         ctx.font = '18px Share Tech Mono, monospace'; ctx.fillStyle = '#667788';
         ctx.fillText(state.difficulty === 'cardinal' ? 'Cardinal axes' : 'Arbitrary 3D', 256, 196);
-        ctx.fillText(`Skips ${state.score.skips}`, 256, 222);
+        const chargeModeLabel = state.chargeMode === 'mixed' ? 'Mixed charges' : 'Positive only';
+        const chargeLabel = state.phase === 'waiting' && state.chargeMode === 'mixed'
+            ? 'q = +/-'
+            : (state.currentChargeSign >= 0 ? 'q = +' : 'q = -');
+        ctx.fillText(`${chargeModeLabel}  |  ${chargeLabel}`, 256, 222);
+        ctx.fillText(`Skips ${state.score.skips}`, 256, 246);
 
         ctx.font = '600 26px Rajdhani, sans-serif';
         if (state.phase === 'waiting') {
             ctx.fillStyle = '#8899aa';
-            ctx.fillText('Show your right hand to begin', 256, 252);
+            ctx.fillText('Show your right hand to begin', 256, 276);
         } else if (state.phase === 'orienting') {
             ctx.fillStyle = '#c0d0e0';
-            ctx.fillText('Orient your flat hand:', 256, 240);
+            ctx.fillText(state.currentChargeSign >= 0 ? 'Orient your flat hand:' : 'Orient for the negative charge force:', 256, 240);
             ctx.font = '22px Rajdhani, sans-serif';
 
             // Show check marks for aligned zones
@@ -606,7 +680,7 @@
             ctx.fillText('Fist detected!', 256, 240);
             ctx.font = '22px Rajdhani, sans-serif';
             ctx.fillStyle = '#c0d0e0';
-            ctx.fillText('Point your thumb along F...', 256, 272);
+            ctx.fillText(state.currentChargeSign >= 0 ? 'Point your thumb along F...' : 'Point your thumb along the negative-charge force...', 256, 272);
 
             ctx.fillStyle = state.thumbOk ? '#20c060' : '#8899aa';
             ctx.fillText((state.thumbOk ? '\u2713 ' : '') + 'Thumb \u2192 F', 256, 302);
@@ -614,12 +688,12 @@
             ctx.fillStyle = '#20c060'; ctx.font = 'bold 32px Rajdhani, sans-serif';
             ctx.fillText('\u2713  CORRECT!', 256, 252);
             ctx.font = '22px Rajdhani, sans-serif'; ctx.fillStyle = '#c0d0e0';
-            ctx.fillText('F = v \u00d7 B', 256, 286);
+            ctx.fillText(state.currentChargeSign >= 0 ? 'F = v \u00d7 B' : 'F = -(v \u00d7 B)', 256, 286);
         } else if (state.phase === 'paused') {
             ctx.fillStyle = '#f0f4f8'; ctx.font = '700 28px Rajdhani, sans-serif';
             ctx.fillText('\u2713  CORRECT!', 256, 240);
             ctx.font = '24px Rajdhani, sans-serif'; ctx.fillStyle = '#c0d0e0';
-            ctx.fillText('F = v \u00d7 B', 256, 272);
+            ctx.fillText(state.currentChargeSign >= 0 ? 'F = v \u00d7 B' : 'F = -(v \u00d7 B)', 256, 272);
             ctx.font = '22px Rajdhani, sans-serif'; ctx.fillStyle = '#8899aa';
             ctx.fillText('Pinch to continue', 256, 312);
         }
@@ -693,6 +767,8 @@
         state.isFist = false; state.thumbExtended = false;
         state.graceTimer = 1.0; // 1 second grace period — no alignment feedback
 
+        state.currentChargeSign = state.chargeMode === 'mixed' ? (Math.random() < 0.5 ? -1 : 1) : 1;
+
         computeVectorTarget();
         snapVectorsToTarget();
 
@@ -712,7 +788,8 @@
 
         state.currentV.copy(v);
         state.currentB.copy(b);
-        state.expectedF.crossVectors(v, b).normalize();
+        state.handRuleF.crossVectors(v, b).normalize();
+        state.expectedF.copy(state.handRuleF).multiplyScalar(state.currentChargeSign);
 
         vArrow.setDirection(v); bArrow.setDirection(b);
         [vArrow, bArrow].forEach(a => {
@@ -726,6 +803,7 @@
         setSceneArrowEmissive(vArrow, SCENE_ARROW_BASE);
         setSceneArrowEmissive(bArrow, SCENE_ARROW_BASE);
         positionVecLabels();
+        updateChargeMarker();
     }
 
     function skipRound() {
@@ -1466,6 +1544,23 @@
     const vrBtn = document.getElementById('enter-vr');
     const statusEl = document.getElementById('status');
     const overlayEl = document.getElementById('overlay');
+    const chargeModeBtns = [...document.querySelectorAll('.mode-btn')];
+
+    function syncChargeModeButtons() {
+        chargeModeBtns.forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.chargeMode === state.chargeMode);
+        });
+    }
+
+    chargeModeBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            state.chargeMode = btn.dataset.chargeMode;
+            state.currentChargeSign = 1;
+            syncChargeModeButtons();
+        });
+    });
+    syncChargeModeButtons();
+
     async function initVR() {
         if (!navigator.xr) {
             vrBtn.textContent = 'WebXR Not Available';
@@ -1491,6 +1586,8 @@
                     state.handTracked = false;
                     resetHandDetectionState();
                     hudAnchoredInXR = false;
+                    state.currentChargeSign = 1;
+                    updateChargeMarker();
                     lastHandData = null;
                     wasPinching = false;
                     fadeAllAudio(0.2);
@@ -1501,6 +1598,7 @@
                 state.phase = 'waiting';
                 resetHandDetectionState();
                 hudAnchoredInXR = false;
+                updateChargeMarker();
                 anchorHudInFrontOfUser();
                 initAudio(); // User gesture context for Web Audio
             } catch (err) { statusEl.textContent = `VR failed: ${err.message}`; }
